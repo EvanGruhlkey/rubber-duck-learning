@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod codex;
+mod models;
 mod request;
 use request::{run_cli, RequestControl, Requests};
 
