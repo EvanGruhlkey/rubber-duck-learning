@@ -23,19 +23,18 @@ if (!process.env.CARGO_TARGET_DIR) {
   process.env.CARGO_TARGET_DIR = dir;
 }
 
-const win = platform() === "win32";
-const tauriBin = join(pkgRoot, "node_modules", ".bin", win ? "tauri.cmd" : "tauri");
+const tauriBin = join(pkgRoot, "node_modules", "@tauri-apps", "cli", "tauri.js");
 if (!existsSync(tauriBin)) {
   console.error("Missing @tauri-apps/cli. From apps/duck-desktop run: npm install");
   process.exit(1);
 }
 
 const tauriArgs = process.argv.slice(2);
-const child = spawnSync(tauriBin, tauriArgs, {
+const child = spawnSync(process.execPath, [tauriBin, ...tauriArgs], {
   cwd: pkgRoot,
   stdio: "inherit",
   env: process.env,
-  shell: win,
+  windowsHide: true,
 });
 
 process.exit(child.status === null ? 1 : child.status);
