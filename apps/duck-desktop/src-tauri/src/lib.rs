@@ -185,10 +185,18 @@ fn claude_programs() -> Vec<PathBuf> {
     v
 }
 
-/// Claude Code: `claude -p` in repo cwd. User text only—no `AGENTS.md` (avoids rubber-duck / Socratic priming).
+fn configure_claude(cmd: &mut Command) {
+    cmd.args([
+        "--permission-mode", "plan",
+        "--tools", "Read,Glob,Grep",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+    ]);
+}
+
+/// Claude only gets file-reading and search tools, regardless of project permissions.
 fn try_claude(root: &Path, user: &str) -> Result<String, String> {
     let args: [&str; 4] = ["-p", user, "--max-turns", "6"];
-    let extra = ["--permission-mode", "acceptEdits"];
 
     let mut last_spawn: Option<String> = None;
     let mut last_run: Option<String> = None;
@@ -199,8 +207,8 @@ fn try_claude(root: &Path, user: &str) -> Result<String, String> {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .args(args)
-            .args(extra);
+            .args(args);
+        configure_claude(&mut cmd);
 
         let out = match cmd.output() {
             Ok(o) => o,
@@ -455,4 +463,21 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![duck_ask])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_only_gets_read_tools_in_plan_mode() {
+        let mut cmd = Command::new("claude");
+        configure_claude(&mut cmd);
+        let args: Vec<_> = cmd.get_args().map(|arg| arg.to_string_lossy()).collect();
+        assert!(args.windows(2).any(|pair| pair == ["--permission-mode", "plan"]));
+        assert!(args.windows(2).any(|pair| pair == ["--tools", "Read,Glob,Grep"]));
+        assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
+        assert!(args.iter().any(|arg| arg == "--disable-slash-commands"));
+        assert!(!args.iter().any(|arg| arg == "acceptEdits"));
+    }
 }
