@@ -151,6 +151,66 @@ pub fn run_cli(
     })
 }
 
+pub fn query_cli(
+    cmd: &mut Command,
+    input: &str,
+    complete: impl Fn(&str) -> bool,
+    control: &RequestControl,
+) -> Result<String, String> {
+    use std::io::{BufRead, BufReader};
+    use std::sync::mpsc;
+    control.check()?;
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut group = cmd.group();
+    #[cfg(windows)]
+    group.creation_flags(0x0800_0000).kill_on_drop(true);
+    let mut child = group.spawn().map_err(|error| error.to_string())?;
+    let mut stdin = child.inner().stdin.take().expect("piped stdin");
+    let stdout = child.inner().stdout.take().expect("piped stdout");
+    let stderr = read_pipe(child.inner().stderr.take().expect("piped stderr"));
+    let (send, receive) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if send.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let result = (|| {
+        stdin
+            .write_all(input.as_bytes())
+            .map_err(|error| error.to_string())?;
+        stdin.flush().map_err(|error| error.to_string())?;
+        let mut output = String::new();
+        loop {
+            control.check()?;
+            match receive.recv_timeout(Duration::from_millis(40)) {
+                Ok(line) => {
+                    let line = line.map_err(|error| error.to_string())?;
+                    output.push_str(&line);
+                    output.push('\n');
+                    if complete(&line) {
+                        return Ok(output);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("The IDE CLI closed before returning its models.".into())
+                }
+            }
+        }
+    })();
+    drop(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+    drop(receive);
+    let _ = reader.join();
+    let _ = stderr.join();
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +234,24 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         cmd
+    }
+
+    #[test]
+    fn initialization_query_keeps_stdin_open_and_stops_after_the_response() {
+        #[cfg(windows)]
+        let mut cmd = shell("$line = [Console]::In.ReadLine(); [Console]::Out.WriteLine('models-ready'); [Console]::Out.Flush(); Start-Sleep -Seconds 30");
+        #[cfg(not(windows))]
+        let mut cmd = shell("read line; printf 'models-ready\\n'; sleep 30");
+        let started = Instant::now();
+        let output = query_cli(
+            &mut cmd,
+            "initialize\n",
+            |line| line == "models-ready",
+            &RequestControl::new(Duration::from_secs(5)),
+        )
+        .unwrap();
+        assert_eq!(output, "models-ready\n");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
