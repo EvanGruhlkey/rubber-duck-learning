@@ -7,11 +7,24 @@ export interface ChatTurn {
   answer: string;
 }
 
-export type LocalAgent = "auto" | "codex" | "claude" | "cursor";
+export interface ModelCatalog {
+  ide: "codex" | "claude" | "cursor";
+  models: { id: string; label: string }[];
+  warning: string | null;
+}
+
+export type CatalogState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; catalog: ModelCatalog };
+
+const IDE_LABELS = { codex: "Codex", claude: "Claude Code", cursor: "Cursor" };
 
 interface SpeechBubbleProps {
-  agent: LocalAgent;
-  onAgentChange: (agent: LocalAgent) => void;
+  catalog: CatalogState;
+  model: string;
+  onModelChange: (model: string) => void;
+  onRefreshModels: () => void;
   message: string;
   inputValue: string;
   onInputChange: (value: string) => void;
@@ -29,8 +42,10 @@ interface SpeechBubbleProps {
 
 /** Soft card + tail; hint, input, Ask, and reply area. */
 export function SpeechBubble({
-  agent,
-  onAgentChange,
+  catalog,
+  model,
+  onModelChange,
+  onRefreshModels,
   message,
   inputValue,
   onInputChange,
@@ -61,18 +76,27 @@ export function SpeechBubble({
   return (
     <div className="speech-bubble no-drag" role="region" aria-label="Rubber duck chat">
       <div className="speech-bubble-inner">
-        <div className="agent-picker">
-          <label htmlFor="duck-agent">Local agent</label>
-          <select id="duck-agent" value={agent} disabled={busy} onChange={(event) => {
-            const value = event.target.value;
-            if (value === "auto" || value === "codex" || value === "claude" || value === "cursor") onAgentChange(value);
-          }}>
-            <option value="auto">Auto</option>
-            <option value="codex">Codex</option>
-            <option value="claude">Claude Code</option>
-            <option value="cursor">Cursor</option>
-          </select>
+        <div className="ide-context">
+          <span>{catalog.kind === "ready" ? IDE_LABELS[catalog.catalog.ide] : "Current IDE"}</span>
+          <button type="button" className="refresh-models" disabled={busy || catalog.kind === "loading"} onClick={onRefreshModels} aria-label="Refresh models">Reload</button>
         </div>
+        {catalog.kind === "loading" && <p className="model-notice" aria-live="polite">Loading your IDE's models...</p>}
+        {catalog.kind === "error" && <p className="speech-bubble-error" role="alert">{catalog.message}</p>}
+        {catalog.kind === "ready" && (
+          <>
+            <div className="agent-picker">
+              <label htmlFor="duck-model">Model</label>
+              <select id="duck-model" value={model} disabled={busy} onChange={(event) => {
+                const value = event.target.value;
+                if (value === "" || catalog.catalog.models.some((entry) => entry.id === value)) onModelChange(value);
+              }}>
+                {catalog.catalog.models.length === 0 && <option value="">CLI default</option>}
+                {catalog.catalog.models.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+              </select>
+            </div>
+            {catalog.catalog.warning && <p className="model-notice">{catalog.catalog.warning}</p>}
+          </>
+        )}
         {turns.length === 0 && <p className="speech-bubble-text">{message}</p>}
         {turns.length > 0 && (
           <div className="conversation" role="log" aria-label="Conversation" ref={conversationRef}>
@@ -116,7 +140,7 @@ export function SpeechBubble({
           <button
             type="button"
             className="speech-bubble-ask"
-            disabled={busy || !inputValue.trim()}
+            disabled={busy || catalog.kind !== "ready" || !inputValue.trim()}
             onClick={onAsk}
           >
             {stopping ? "Stopping…" : busy ? "Thinking…" : "Ask the duck"}

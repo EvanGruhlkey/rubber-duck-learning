@@ -6,7 +6,7 @@ use crate::{
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn configure(cmd: &mut Command) {
+fn configure(cmd: &mut Command, model: &str) {
     cmd.args([
         "--no-daemon",
         "--ask-for-approval",
@@ -26,8 +26,11 @@ fn configure(cmd: &mut Command) {
         "mcp_servers={}",
         "--color",
         "never",
-        "-",
     ]);
+    if !model.is_empty() {
+        cmd.args(["--model", model]);
+    }
+    cmd.arg("-");
 }
 
 fn programs() -> Vec<PathBuf> {
@@ -74,7 +77,29 @@ fn programs() -> Vec<PathBuf> {
     programs
 }
 
-pub fn ask(root: &Path, prompt: &str, control: &RequestControl) -> Result<String, String> {
+pub fn list_models(
+    root: &Path,
+    control: &RequestControl,
+) -> Result<Vec<crate::models::Model>, String> {
+    let program = programs()
+        .into_iter()
+        .next()
+        .ok_or("Codex CLI was not found.")?;
+    let mut cmd = cli_command(&program);
+    cmd.current_dir(root).args(["debug", "models"]);
+    let output = run_cli(&mut cmd, "", control)?;
+    if !output.status.success() {
+        return Err("Codex could not list its models. Check its login in your IDE.".into());
+    }
+    crate::models::parse_codex(&String::from_utf8_lossy(&output.stdout))
+}
+
+pub fn ask(
+    root: &Path,
+    prompt: &str,
+    model: &str,
+    control: &RequestControl,
+) -> Result<String, String> {
     let programs = programs();
     if programs.is_empty() {
         return Err(
@@ -87,7 +112,7 @@ pub fn ask(root: &Path, prompt: &str, control: &RequestControl) -> Result<String
         control.check()?;
         let mut cmd = cli_command(&program);
         cmd.current_dir(root);
-        configure(&mut cmd);
+        configure(&mut cmd, model);
         let output = match run_cli(&mut cmd, prompt, control) {
             Ok(output) => output,
             Err(error) => {
@@ -121,7 +146,7 @@ mod tests {
     #[test]
     fn codex_is_read_only_ephemeral_and_runs_without_the_shared_daemon() {
         let mut cmd = Command::new("codex");
-        configure(&mut cmd);
+        configure(&mut cmd, "gpt-example");
         let args: Vec<_> = cmd.get_args().map(|arg| arg.to_string_lossy()).collect();
         assert!(args.iter().any(|arg| arg == "--no-daemon"));
         assert!(args.iter().any(|arg| arg == "exec"));
@@ -137,5 +162,8 @@ mod tests {
             assert!(args.windows(2).any(|pair| pair == ["--disable", feature]));
         }
         assert_eq!(args.last().map(|arg| arg.as_ref()), Some("-"));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--model", "gpt-example"]));
     }
 }

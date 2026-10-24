@@ -4,24 +4,14 @@ use std::process::Command;
 mod codex;
 mod models;
 mod request;
+use models::{Catalog, CatalogState, Ide};
 use request::{run_cli, RequestControl, Requests};
 
 const COACHING_PROMPT: &str = "You are Rubber Duck, a read-only learning companion. Never edit files or provide paste-ready fixes. For debugging, ask one focused question and offer small hints grounded in files you read. For concept questions, explain in plain language first. Continue the provided conversation and keep replies concise.\n\n";
 
-#[derive(Debug, PartialEq)]
-enum Agent {
-    Codex,
-    Claude,
-    Cursor,
-}
-
-fn agent_order(agent: &str) -> Result<&'static [Agent], String> {
-    match agent {
-        "auto" => Ok(&[Agent::Codex, Agent::Claude, Agent::Cursor]),
-        "codex" => Ok(&[Agent::Codex]),
-        "claude" => Ok(&[Agent::Claude]),
-        "cursor" => Ok(&[Agent::Cursor]),
-        _ => Err("Choose Auto, Codex, Claude Code, or Cursor.".into()),
+fn configure_model(cmd: &mut Command, model: &str) {
+    if !model.is_empty() {
+        cmd.args(["--model", model]);
     }
 }
 
@@ -225,7 +215,12 @@ fn configure_claude(cmd: &mut Command) {
 }
 
 /// Claude only gets file-reading and search tools, regardless of project permissions.
-fn try_claude(root: &Path, user: &str, control: &RequestControl) -> Result<String, String> {
+fn try_claude(
+    root: &Path,
+    user: &str,
+    model: &str,
+    control: &RequestControl,
+) -> Result<String, String> {
     let args = ["-p", "--max-turns", "6"];
 
     let mut last_spawn: Option<String> = None;
@@ -236,6 +231,7 @@ fn try_claude(root: &Path, user: &str, control: &RequestControl) -> Result<Strin
         let mut cmd = cli_command(&program);
         cmd.current_dir(root).args(args);
         configure_claude(&mut cmd);
+        configure_model(&mut cmd, model);
 
         let out = match run_cli(&mut cmd, user, control) {
             Ok(o) => o,
@@ -280,10 +276,7 @@ fn try_claude(root: &Path, user: &str, control: &RequestControl) -> Result<Strin
 }
 
 /// Cursor agent: prompt is the user’s question only (no `AGENTS.md`—lets the model answer normally).
-fn try_cursor_agent(root: &Path, user: &str, control: &RequestControl) -> Result<String, String> {
-    let mut last_spawn: Option<String> = None;
-    let mut last_run: Option<String> = None;
-
+fn agent_programs() -> Vec<PathBuf> {
     let mut agent_programs: Vec<PathBuf> = Vec::new();
     for key in ["RUBBER_DUCK_AGENT", "RUBBER_DUCK_CURSOR_AGENT"] {
         if let Ok(p) = std::env::var(key) {
@@ -300,7 +293,18 @@ fn try_cursor_agent(root: &Path, user: &str, control: &RequestControl) -> Result
         agent_programs.push(PathBuf::from("agent.exe"));
     }
 
-    for program in agent_programs {
+    agent_programs
+}
+
+fn try_cursor_agent(
+    root: &Path,
+    user: &str,
+    model: &str,
+    control: &RequestControl,
+) -> Result<String, String> {
+    let mut last_spawn: Option<String> = None;
+    let mut last_run: Option<String> = None;
+    for program in agent_programs() {
         control.check()?;
         let mut cmd = cli_command(&program);
         cmd.current_dir(root)
@@ -310,6 +314,7 @@ fn try_cursor_agent(root: &Path, user: &str, control: &RequestControl) -> Result
             .arg("text")
             .arg("--mode")
             .arg("ask");
+        configure_model(&mut cmd, model);
 
         let out = match run_cli(&mut cmd, user, control) {
             Ok(o) => o,
@@ -368,6 +373,7 @@ fn try_cursor_agent(root: &Path, user: &str, control: &RequestControl) -> Result
             "--mode",
             "ask",
         ]);
+        configure_model(&mut cmd, model);
 
         let out = match run_cli(&mut cmd, user, control) {
             Ok(o) => o,
@@ -445,15 +451,130 @@ fn cursor_programs() -> Vec<PathBuf> {
 }
 
 #[tauri::command]
+async fn duck_models(catalog: tauri::State<'_, CatalogState>) -> Result<Catalog, String> {
+    *catalog
+        .0
+        .lock()
+        .map_err(|_| "Restart the duck to reload your IDE.")? = None;
+    let result = tauri::async_runtime::spawn_blocking(discover_models)
+        .await
+        .map_err(|_| "Could not read your IDE's models.")??;
+    *catalog
+        .0
+        .lock()
+        .map_err(|_| "Restart the duck to reload your IDE.")? = Some(result.clone());
+    Ok(result)
+}
+
+fn discover_models() -> Result<Catalog, String> {
+    let ide = models::current_ide()?;
+    let root =
+        project_root().ok_or("Open a project containing AGENTS.md before starting the duck.")?;
+    let control = RequestControl::new(std::time::Duration::from_secs(15));
+    let result = match ide {
+        Ide::Codex => codex::list_models(&root, &control),
+        Ide::Claude => list_claude_models(&root, &control),
+        Ide::Cursor => list_cursor_models(&root, &control),
+    };
+    let (models, warning) = match result {
+        Ok(models) => (models, None),
+        Err(error) => (
+            Vec::new(),
+            Some(format!(
+                "Model list unavailable. Using the CLI default. {error}"
+            )),
+        ),
+    };
+    Ok(Catalog {
+        ide,
+        models,
+        warning,
+    })
+}
+
+fn list_claude_models(root: &Path, control: &RequestControl) -> Result<Vec<models::Model>, String> {
+    let input = "{\"type\":\"control_request\",\"request_id\":\"duck-models\",\"request\":{\"subtype\":\"initialize\"}}\n";
+    for program in claude_programs() {
+        control.check()?;
+        let mut cmd = cli_command(&program);
+        cmd.current_dir(root).args([
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]);
+        configure_claude(&mut cmd);
+        let result = request::query_cli(
+            &mut cmd,
+            input,
+            |line| {
+                serde_json::from_str::<serde_json::Value>(line).is_ok_and(|value| {
+                    value["type"] == "control_response"
+                        && value["response"]["request_id"] == "duck-models"
+                })
+            },
+            control,
+        );
+        if let Ok(output) = result {
+            return models::parse_claude(&output);
+        }
+    }
+    Err("Claude CLI did not report its models. Check its login and version.".into())
+}
+
+fn list_cursor_models(root: &Path, control: &RequestControl) -> Result<Vec<models::Model>, String> {
+    let programs = agent_programs()
+        .into_iter()
+        .map(|path| (path, false))
+        .chain(
+            cursor_programs()
+                .into_iter()
+                .filter(|path| !is_cursor_gui_exe(path))
+                .map(|path| (path, true)),
+        );
+    for (program, editor_cli) in programs {
+        control.check()?;
+        let mut cmd = cli_command(&program);
+        cmd.current_dir(root)
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb");
+        if editor_cli {
+            cmd.arg("agent");
+        }
+        cmd.arg("--list-models");
+        if let Ok(output) = run_cli(&mut cmd, "", control) {
+            if output.status.success() {
+                if let Ok(models) = models::parse_cursor(&String::from_utf8_lossy(&output.stdout)) {
+                    return Ok(models);
+                }
+            }
+        }
+    }
+    Err("Cursor CLI did not report its models. Check its login and version.".into())
+}
+
+#[tauri::command]
 async fn duck_ask(
     message: String,
-    agent: String,
+    model: String,
     request_id: u64,
     requests: tauri::State<'_, Requests>,
+    catalog: tauri::State<'_, CatalogState>,
 ) -> Result<String, String> {
+    let catalog = catalog
+        .0
+        .lock()
+        .map_err(|_| "Restart the duck to reload your IDE.")?
+        .clone()
+        .ok_or("Load your IDE's models before asking.")?;
+    catalog.validate(&model)?;
     let control = requests.start(request_id)?;
-    let result =
-        tauri::async_runtime::spawn_blocking(move || answer(&message, &agent, &control)).await;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        answer(&message, catalog.ide, &model, &control)
+    })
+    .await;
     requests.finish(request_id)?;
     result.map_err(|_| "The request failed. Try asking again.".to_string())?
 }
@@ -463,7 +584,12 @@ fn duck_cancel(request_id: u64, requests: tauri::State<'_, Requests>) -> Result<
     requests.cancel(request_id)
 }
 
-fn answer(message: &str, agent: &str, control: &RequestControl) -> Result<String, String> {
+fn answer(
+    message: &str,
+    ide: Ide,
+    model: &str,
+    control: &RequestControl,
+) -> Result<String, String> {
     let user = message.trim();
     if user.is_empty() {
         return Err(String::from("Type something first, then press Ask."));
@@ -481,24 +607,13 @@ fn answer(message: &str, agent: &str, control: &RequestControl) -> Result<String
     }
 
     let prompt = format!("{COACHING_PROMPT}{user}");
-    let mut errors = Vec::new();
-    for agent in agent_order(agent)? {
-        control.check()?;
-        let (name, result) = match agent {
-            Agent::Codex => ("Codex", codex::ask(&root, &prompt, control)),
-            Agent::Claude => ("Claude Code", try_claude(&root, &prompt, control)),
-            Agent::Cursor => ("Cursor", try_cursor_agent(&root, &prompt, control)),
-        };
-        control.check()?;
-        match result {
-            Ok(reply) => return Ok(reply),
-            Err(error) => errors.push(format!("{name}:\n{error}")),
-        }
-    }
-    Err(format!(
-        "Could not get a reply from your local agent.\n\n{}\n\nInstall and sign in to Codex, Claude Code, or Cursor Agent CLI. Set RUBBER_DUCK_CODEX, RUBBER_DUCK_CLAUDE, or RUBBER_DUCK_AGENT if the executable is not on PATH. Restart the duck after changing environment variables.",
-        errors.join("\n\n")
-    ))
+    let result = match ide {
+        Ide::Codex => codex::ask(&root, &prompt, model, control),
+        Ide::Claude => try_claude(&root, &prompt, model, control),
+        Ide::Cursor => try_cursor_agent(&root, &prompt, model, control),
+    };
+    control.check()?;
+    result
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -506,7 +621,8 @@ pub fn run() {
     load_dotenv_walking_parents();
     tauri::Builder::default()
         .manage(Requests::default())
-        .invoke_handler(tauri::generate_handler![duck_ask, duck_cancel])
+        .manage(CatalogState::default())
+        .invoke_handler(tauri::generate_handler![duck_ask, duck_cancel, duck_models])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -514,18 +630,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn explicit_agent_never_falls_back_to_another_provider() {
-        assert_eq!(agent_order("codex").unwrap(), &[Agent::Codex]);
-        assert_eq!(agent_order("claude").unwrap(), &[Agent::Claude]);
-        assert_eq!(agent_order("cursor").unwrap(), &[Agent::Cursor]);
-        assert_eq!(
-            agent_order("auto").unwrap(),
-            &[Agent::Codex, Agent::Claude, Agent::Cursor]
-        );
-        assert!(agent_order("powershell.exe").is_err());
-    }
 
     #[test]
     fn cursor_editor_stdin_notice_is_not_an_answer() {

@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { SpeechBubble, type ChatTurn, type LocalAgent } from "./SpeechBubble";
+import { SpeechBubble, type ChatTurn, type ModelCatalog, type CatalogState } from "./SpeechBubble";
 import "./App.css";
 
 const DUCK_DRAG_THRESHOLD = 8;
@@ -21,7 +21,9 @@ function errorMessage(error: unknown): string {
 export default function App() {
   const [bubbleOpen, setBubbleOpen] = useState(false);
   const [draft, setDraft] = useState("");
-  const [agent, setAgent] = useState<LocalAgent>("auto");
+  const [catalog, setCatalog] = useState<CatalogState>({ kind: "loading" });
+  const [model, setModel] = useState("");
+  const catalogGeneration = useRef(0);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState<RequestStatus>({ kind: "idle" });
@@ -29,6 +31,26 @@ export default function App() {
   const nextRequestId = useRef(Date.now());
   const [notice, setNotice] = useState<string | null>(null);
   const busy = request.kind !== "idle";
+  const refreshModels = useCallback(async () => {
+    if (requestRef.current.kind !== "idle") return;
+    const generation = ++catalogGeneration.current;
+    setCatalog({ kind: "loading" });
+    setModel("");
+    try {
+      const result = await invoke<ModelCatalog>("duck_models");
+      if (generation === catalogGeneration.current) {
+        setModel(result.models[0]?.id ?? "");
+        setCatalog({ kind: "ready", catalog: result });
+      }
+    } catch (error) {
+      if (generation === catalogGeneration.current) setCatalog({ kind: "error", message: errorMessage(error) });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshModels();
+    return () => { catalogGeneration.current += 1; };
+  }, [refreshModels]);
   const duckDragRef = useRef<{ x: number; y: number; armed: boolean } | null>(
     null,
   );
@@ -39,7 +61,7 @@ export default function App() {
 
   const onAsk = useCallback(async () => {
     const text = draft.trim();
-    if (!text || requestRef.current.kind !== "idle") return;
+    if (!text || requestRef.current.kind !== "idle" || catalog.kind !== "ready") return;
     const id = ++nextRequestId.current;
     const pending: RequestStatus = { kind: "running", id, startedAt: Date.now() };
     requestRef.current = pending;
@@ -50,7 +72,7 @@ export default function App() {
       const message = turns.length
         ? `Previous conversation (JSON):\n${JSON.stringify(turns)}\n\nCurrent question:\n${text}`
         : text;
-      const out = await invoke<string>("duck_ask", { message, agent, requestId: id });
+      const out = await invoke<string>("duck_ask", { message, model, requestId: id });
       if (requestRef.current.kind === "running") {
         setTurns((previous) => [...previous, { question: text, answer: out }]);
         setDraft("");
@@ -62,7 +84,7 @@ export default function App() {
       requestRef.current = { kind: "idle" };
       setRequest({ kind: "idle" });
     }
-  }, [draft, turns, agent]);
+  }, [draft, turns, model, catalog]);
 
   const onStop = useCallback(async () => {
     const current = requestRef.current;
@@ -159,8 +181,10 @@ export default function App() {
         <div className="stage-bubble-slot">
           {bubbleOpen && (
             <SpeechBubble
-              agent={agent}
-              onAgentChange={setAgent}
+              catalog={catalog}
+              model={model}
+              onModelChange={setModel}
+              onRefreshModels={refreshModels}
               message={BUBBLE_HINT}
               inputValue={draft}
               onInputChange={setDraft}

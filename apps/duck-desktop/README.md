@@ -2,13 +2,17 @@
 
 Tauri 2 + React: a small frameless window with a pixel duck. Tap to open the panel, type a question, and **Ask the duck** runs a local CLI from your project root—no HTTP API keys in this app.
 
-Choose **Codex**, **Claude Code**, or **Cursor** in the Local agent picker. The duck runs your signed-in CLI directly. It does not use an API SDK, ask for API keys, or store credentials.
+The duck detects the IDE it was launched from and shows that IDE's model list. Codex offers its ChatGPT models, Claude Code offers its Claude models, and Cursor offers all model families available through Cursor. The duck runs that IDE's signed-in CLI directly. It does not use an API SDK, ask for API keys, or store credentials.
 
 ## How “Ask the duck” works
 
-**Auto** tries Codex, Claude Code, then Cursor. Selecting an agent explicitly uses only that agent and reports its errors without falling back to another provider.
+The IDE label is fixed for the app session. The **Model** picker loads choices from that IDE's CLI, and **Reload** refreshes the list. A selected model is checked against the backend catalog before it is passed through `--model`. Requests never switch to another IDE or provider when a CLI fails.
 
-- **Codex**: Uses `codex exec` with the read-only sandbox, no approval prompts, and an ephemeral session. It runs without the shared daemon so Stop terminates the request itself. User configuration, MCP servers, apps, plugins, and hooks are disabled for the request; authentication still uses your existing Codex login. No model is forced. Install a current CLI and sign in with `codex login`. The app checks PATH and the Codex desktop app's Windows CLI installation, or accepts `RUBBER_DUCK_CODEX` as an executable path.
+IDE detection uses the launching environment: Cursor markers, Claude Code markers, then Codex markers. For a desktop shortcut or an environment without these markers, set `RUBBER_DUCK_IDE=codex`, `claude`, or `cursor` before launching. Detection does not guess from which tools happen to be installed or follow foreground-window changes.
+
+Codex catalogs come from `codex debug models`, with hidden entries excluded. Claude catalogs come from its CLI initialization control response. Cursor catalogs come from `agent --list-models`. The first reported model is selected initially. If a CLI cannot report its models, the picker offers only **CLI default** with a warning. It never adds models from another provider or a hard-coded public catalog.
+
+- **Codex**: Uses `codex exec` with the read-only sandbox, no approval prompts, and an ephemeral session. It runs without the shared daemon so Stop terminates the request itself. User configuration, MCP servers, apps, plugins, and hooks are disabled for the request; authentication still uses your existing Codex login. **CLI default**, available only when discovery fails, omits the model override and may differ from your configured IDE default. Install a current CLI and sign in with `codex login`. The app checks PATH and the Codex desktop app's Windows CLI installation, or accepts `RUBBER_DUCK_CODEX` as an executable path.
 - **Claude Code**: Uses plan mode, with only `Read`, `Glob`, and `Grep` available. Slash commands and inherited MCP servers are disabled.
 - **Cursor**: Uses `agent --trust -p --mode ask` or `cursor agent --trust -p --mode ask`. Cursor stays in its read-only Ask mode; the app never passes `--force`.
 

@@ -260,6 +260,39 @@ body {
   font-size: 12px;
 }
 
+.ide-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.refresh-models {
+  padding: 2px 4px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.refresh-models:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.model-notice {
+  margin: 0 0 8px;
+  max-height: 48px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
 .agent-picker select {
   flex: 1;
   min-width: 0;
