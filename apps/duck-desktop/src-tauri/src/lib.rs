@@ -94,6 +94,9 @@ fn is_cli_noise_line(line: &str) -> bool {
     if t.starts_with("(node:") && t.contains("DeprecationWarning") {
         return true;
     }
+    if t.starts_with("Run with 'cursor -' to read output from another program") {
+        return true;
+    }
     let lower = t.to_ascii_lowercase();
     if lower.contains("--trace-deprecation") {
         return true;
@@ -499,6 +502,42 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_editor_stdin_notice_is_not_an_answer() {
+        let notice = b"Run with 'cursor -' to read output from another program (e.g. 'echo Hello World | cursor -').";
+        assert_eq!(headless_cli_text(notice, b""), "");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cmd_shim_with_spaces_receives_literal_prompt() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("duck cli probe {suffix}"));
+        std::fs::create_dir(&dir).unwrap();
+        let shim = dir.join("assistant.cmd");
+        std::fs::write(&shim, "@echo off\r\npowershell.exe -NoProfile -NonInteractive -Command \"[Console]::Out.Write([Console]::In.ReadToEnd())\"\r\n").unwrap();
+        let mut cmd = cli_command(&shim);
+        cmd.args(["-p", "--max-turns", "6"]);
+        configure_claude(&mut cmd);
+        let prompt = "Explain \"hello\" & echo NOPE | more > file %PATH%\nsecond line";
+        let output = run_cli(
+            &mut cmd,
+            prompt,
+            &RequestControl::new(std::time::Duration::from_secs(10)),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), prompt);
+    }
 
     #[test]
     fn claude_only_gets_read_tools_in_plan_mode() {
