@@ -49,3 +49,7 @@ npm run tauri:build
 ```
 
 Tap the duck for the panel, drag to move, close from the taskbar.
+
+Hiding the panel keeps your draft, replies, and any pending request. Follow-up questions include the previous conversation. **New chat** clears it explicitly. Conversation state stays in memory for this app session and is not saved to disk by the duck; the underlying CLI may keep its own session logs.
+
+Run frontend regression tests with `npm test` and backend tests with `cargo test --manifest-path src-tauri/Cargo.toml`.

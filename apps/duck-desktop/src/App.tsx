@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { SpeechBubble } from "./SpeechBubble";
+import { SpeechBubble, type ChatTurn } from "./SpeechBubble";
 import "./App.css";
 
 const DUCK_DRAG_THRESHOLD = 8;
@@ -12,21 +12,12 @@ const BUBBLE_HINT =
 export default function App() {
   const [bubbleOpen, setBubbleOpen] = useState(false);
   const [draft, setDraft] = useState("");
-  const [reply, setReply] = useState<string | null>(null);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const duckDragRef = useRef<{ x: number; y: number; armed: boolean } | null>(
     null,
   );
-
-  useEffect(() => {
-    if (!bubbleOpen) {
-      setDraft("");
-      setReply(null);
-      setError(null);
-      setBusy(false);
-    }
-  }, [bubbleOpen]);
 
   const beginWindowDrag = useCallback(() => {
     void getCurrentWindow().startDragging();
@@ -37,21 +28,31 @@ export default function App() {
     if (!text || busy) return;
     setBusy(true);
     setError(null);
-    setReply(null);
     try {
-      const out = await invoke<string>("duck_ask", { message: text });
-      setReply(out);
+      const message = turns.length
+        ? `Previous conversation (JSON):\n${JSON.stringify(turns)}\n\nCurrent question:\n${text}`
+        : text;
+      const out = await invoke<string>("duck_ask", { message });
+      setTurns((previous) => [...previous, { question: text, answer: out }]);
+      setDraft("");
     } catch (e) {
       let msg: string;
       if (typeof e === "string") msg = e;
       else if (e && typeof e === "object" && "message" in e)
-        msg = String((e as { message: unknown }).message);
+        msg = String(e.message);
       else msg = String(e);
       setError(msg);
     } finally {
       setBusy(false);
     }
-  }, [busy, draft]);
+  }, [busy, draft, turns]);
+
+  const onNewChat = useCallback(() => {
+    if (busy) return;
+    setTurns([]);
+    setDraft("");
+    setError(null);
+  }, [busy]);
 
   const onRootPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -128,7 +129,8 @@ export default function App() {
               onInputChange={setDraft}
               onAsk={onAsk}
               busy={busy}
-              reply={reply}
+              turns={turns}
+              onNewChat={onNewChat}
               error={error}
             />
           )}
