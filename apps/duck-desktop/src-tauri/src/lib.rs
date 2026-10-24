@@ -1,10 +1,28 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod codex;
 mod request;
 use request::{run_cli, RequestControl, Requests};
 
 const COACHING_PROMPT: &str = "You are Rubber Duck, a read-only learning companion. Never edit files or provide paste-ready fixes. For debugging, ask one focused question and offer small hints grounded in files you read. For concept questions, explain in plain language first. Continue the provided conversation and keep replies concise.\n\n";
+
+#[derive(Debug, PartialEq)]
+enum Agent {
+    Codex,
+    Claude,
+    Cursor,
+}
+
+fn agent_order(agent: &str) -> Result<&'static [Agent], String> {
+    match agent {
+        "auto" => Ok(&[Agent::Codex, Agent::Claude, Agent::Cursor]),
+        "codex" => Ok(&[Agent::Codex]),
+        "claude" => Ok(&[Agent::Claude]),
+        "cursor" => Ok(&[Agent::Cursor]),
+        _ => Err("Choose Auto, Codex, Claude Code, or Cursor.".into()),
+    }
+}
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -428,11 +446,13 @@ fn cursor_programs() -> Vec<PathBuf> {
 #[tauri::command]
 async fn duck_ask(
     message: String,
+    agent: String,
     request_id: u64,
     requests: tauri::State<'_, Requests>,
 ) -> Result<String, String> {
     let control = requests.start(request_id)?;
-    let result = tauri::async_runtime::spawn_blocking(move || answer(&message, &control)).await;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || answer(&message, &agent, &control)).await;
     requests.finish(request_id)?;
     result.map_err(|_| "The request failed. Try asking again.".to_string())?
 }
@@ -442,7 +462,7 @@ fn duck_cancel(request_id: u64, requests: tauri::State<'_, Requests>) -> Result<
     requests.cancel(request_id)
 }
 
-fn answer(message: &str, control: &RequestControl) -> Result<String, String> {
+fn answer(message: &str, agent: &str, control: &RequestControl) -> Result<String, String> {
     let user = message.trim();
     if user.is_empty() {
         return Err(String::from("Type something first, then press Ask."));
@@ -460,32 +480,23 @@ fn answer(message: &str, control: &RequestControl) -> Result<String, String> {
     }
 
     let prompt = format!("{COACHING_PROMPT}{user}");
-    let claude_result = try_claude(&root, &prompt, control);
-    control.check()?;
-    if let Ok(ref text) = claude_result {
-        if !text.is_empty() {
-            return Ok(text.clone());
+    let mut errors = Vec::new();
+    for agent in agent_order(agent)? {
+        control.check()?;
+        let (name, result) = match agent {
+            Agent::Codex => ("Codex", codex::ask(&root, &prompt, control)),
+            Agent::Claude => ("Claude Code", try_claude(&root, &prompt, control)),
+            Agent::Cursor => ("Cursor", try_cursor_agent(&root, &prompt, control)),
+        };
+        control.check()?;
+        match result {
+            Ok(reply) => return Ok(reply),
+            Err(error) => errors.push(format!("{name}:\n{error}")),
         }
     }
-
-    let agent_result = try_cursor_agent(&root, &prompt, control);
-    control.check()?;
-    if let Ok(ref text) = agent_result {
-        if !text.is_empty() {
-            return Ok(text.clone());
-        }
-    }
-
-    let claude_err = claude_result
-        .err()
-        .unwrap_or_else(|| String::from("claude returned empty stdout"));
-    let agent_err = agent_result
-        .err()
-        .unwrap_or_else(|| String::from("agent returned empty stdout"));
-
     Err(format!(
-        "Could not get a reply from local CLIs.\n\n**Claude Code**:\n{}\n\n**Cursor (agent / cursor agent)**:\n{}\n\nTips (Windows): GUI apps often miss `%%APPDATA%%\\npm` on PATH. This build prepends that and Cursor install dirs. The duck passes **`--trust`** to Cursor Agent for your project root (same as approving the workspace once in a terminal). If Claude is missing, install the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/cli-usage) or set **`RUBBER_DUCK_CLAUDE`** to `claude.exe` / `claude.cmd`. For Cursor, set **`RUBBER_DUCK_CURSOR`** to the `cursor` CLI under `…\\Programs\\cursor\\resources\\app\\bin\\` — not **`Cursor.exe`** (the GUI cannot run `agent`). **`RUBBER_DUCK_AGENT`** can point at `%LOCALAPPDATA%\\cursor-agent\\agent.cmd`. Restart the duck after changing env vars.",
-        claude_err, agent_err
+        "Could not get a reply from your local agent.\n\n{}\n\nInstall and sign in to Codex, Claude Code, or Cursor Agent CLI. Set RUBBER_DUCK_CODEX, RUBBER_DUCK_CLAUDE, or RUBBER_DUCK_AGENT if the executable is not on PATH. Restart the duck after changing environment variables.",
+        errors.join("\n\n")
     ))
 }
 
@@ -502,6 +513,18 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_agent_never_falls_back_to_another_provider() {
+        assert_eq!(agent_order("codex").unwrap(), &[Agent::Codex]);
+        assert_eq!(agent_order("claude").unwrap(), &[Agent::Claude]);
+        assert_eq!(agent_order("cursor").unwrap(), &[Agent::Cursor]);
+        assert_eq!(
+            agent_order("auto").unwrap(),
+            &[Agent::Codex, Agent::Claude, Agent::Cursor]
+        );
+        assert!(agent_order("powershell.exe").is_err());
+    }
 
     #[test]
     fn cursor_editor_stdin_notice_is_not_an_answer() {

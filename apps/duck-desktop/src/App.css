@@ -251,6 +251,35 @@ body {
   display: none;
 }
 
+.agent-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.agent-picker select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid #a8a29e;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.agent-picker select:disabled {
+  opacity: 0.6;
+}
+
+.agent-picker option {
+  color: #1c1917;
+  background: #fffcf5;
+}
+
 .conversation {
   min-height: 0;
   max-height: 160px;

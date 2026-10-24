@@ -26,6 +26,23 @@ async function openDuck() {
 }
 
 describe("duck conversation", () => {
+  it("uses the selected local agent and prevents changes while answering", async () => {
+    let finish: (reply: string) => void = () => { throw new Error("Request was not started"); };
+    vi.mocked(invoke).mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+    const user = await openDuck();
+    const picker = screen.getByRole<HTMLSelectElement>("combobox", { name: "Local agent" });
+    await user.selectOptions(picker, "codex");
+    await user.type(screen.getByRole("textbox"), "Explain loops");
+    await user.click(screen.getByRole("button", { name: "Ask the duck" }));
+    expect(invoke).toHaveBeenCalledWith("duck_ask", expect.objectContaining({ agent: "codex", message: "Explain loops" }));
+    expect(picker.disabled).toBe(true);
+    await act(async () => finish("A loop repeats a step."));
+    expect(picker.disabled).toBe(false);
+    await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
+    await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Local agent" }).value).toBe("codex");
+  });
+
   it("opens and hides the panel with the keyboard", async () => {
     const user = userEvent.setup();
     render(<App />);

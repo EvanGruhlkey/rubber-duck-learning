@@ -1,13 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { SpeechBubble, type ChatTurn } from "./SpeechBubble";
+import { SpeechBubble, type ChatTurn, type LocalAgent } from "./SpeechBubble";
 import "./App.css";
 
 const DUCK_DRAG_THRESHOLD = 8;
 
 const BUBBLE_HINT =
-  "Ask a concept (e.g. “What is debugging?”) or, if you’re stuck on a bug, one line: what you expected vs what happened.";
+  "Ask a question, or describe what you expected and what happened.";
 
 type RequestStatus =
   | { kind: "idle" }
@@ -21,6 +21,7 @@ function errorMessage(error: unknown): string {
 export default function App() {
   const [bubbleOpen, setBubbleOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [agent, setAgent] = useState<LocalAgent>("auto");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState<RequestStatus>({ kind: "idle" });
@@ -49,7 +50,7 @@ export default function App() {
       const message = turns.length
         ? `Previous conversation (JSON):\n${JSON.stringify(turns)}\n\nCurrent question:\n${text}`
         : text;
-      const out = await invoke<string>("duck_ask", { message, requestId: id });
+      const out = await invoke<string>("duck_ask", { message, agent, requestId: id });
       if (requestRef.current.kind === "running") {
         setTurns((previous) => [...previous, { question: text, answer: out }]);
         setDraft("");
@@ -61,7 +62,7 @@ export default function App() {
       requestRef.current = { kind: "idle" };
       setRequest({ kind: "idle" });
     }
-  }, [draft, turns]);
+  }, [draft, turns, agent]);
 
   const onStop = useCallback(async () => {
     const current = requestRef.current;
@@ -158,6 +159,8 @@ export default function App() {
         <div className="stage-bubble-slot">
           {bubbleOpen && (
             <SpeechBubble
+              agent={agent}
+              onAgentChange={setAgent}
               message={BUBBLE_HINT}
               inputValue={draft}
               onInputChange={setDraft}

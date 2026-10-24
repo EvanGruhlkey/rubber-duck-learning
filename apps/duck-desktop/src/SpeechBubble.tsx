@@ -7,7 +7,11 @@ export interface ChatTurn {
   answer: string;
 }
 
+export type LocalAgent = "auto" | "codex" | "claude" | "cursor";
+
 interface SpeechBubbleProps {
+  agent: LocalAgent;
+  onAgentChange: (agent: LocalAgent) => void;
   message: string;
   inputValue: string;
   onInputChange: (value: string) => void;
@@ -25,6 +29,8 @@ interface SpeechBubbleProps {
 
 /** Soft card + tail; hint, input, Ask, and reply area. */
 export function SpeechBubble({
+  agent,
+  onAgentChange,
   message,
   inputValue,
   onInputChange,
@@ -55,6 +61,18 @@ export function SpeechBubble({
   return (
     <div className="speech-bubble no-drag" role="region" aria-label="Rubber duck chat">
       <div className="speech-bubble-inner">
+        <div className="agent-picker">
+          <label htmlFor="duck-agent">Local agent</label>
+          <select id="duck-agent" value={agent} disabled={busy} onChange={(event) => {
+            const value = event.target.value;
+            if (value === "auto" || value === "codex" || value === "claude" || value === "cursor") onAgentChange(value);
+          }}>
+            <option value="auto">Auto</option>
+            <option value="codex">Codex</option>
+            <option value="claude">Claude Code</option>
+            <option value="cursor">Cursor</option>
+          </select>
+        </div>
         {turns.length === 0 && <p className="speech-bubble-text">{message}</p>}
         {turns.length > 0 && (
           <div className="conversation" role="log" aria-label="Conversation" ref={conversationRef}>

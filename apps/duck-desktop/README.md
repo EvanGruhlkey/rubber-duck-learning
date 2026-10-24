@@ -2,11 +2,15 @@
 
 Tauri 2 + React: a small frameless window with a pixel duck. Tap to open the panel, type a question, and **Ask the duck** runs a local CLI from your project root—no HTTP API keys in this app.
 
-**Right now this is built for [Claude Code](https://docs.claude.com/en/docs/claude-code/cli-usage) and [Cursor’s headless CLI](https://cursor.com/docs/cli/headless).** Other tools are not wired in yet.
+Choose **Codex**, **Claude Code**, or **Cursor** in the Local agent picker. The duck runs your signed-in CLI directly. It does not use an API SDK, ask for API keys, or store credentials.
 
 ## How “Ask the duck” works
 
-The app tries **Claude Code** first in plan mode, with only `Read`, `Glob`, and `Grep` available. It disables slash commands and inherited MCP servers for these requests. If Claude fails, it tries **`agent --trust -p --mode ask …`** or **`cursor agent --trust -p --mode ask …`**. Cursor stays in its read-only Ask mode; the app never passes `--force`.
+**Auto** tries Codex, Claude Code, then Cursor. Selecting an agent explicitly uses only that agent and reports its errors without falling back to another provider.
+
+- **Codex**: Uses `codex exec` with the read-only sandbox, no approval prompts, and an ephemeral session. It runs without the shared daemon so Stop terminates the request itself. User configuration, MCP servers, apps, plugins, and hooks are disabled for the request; authentication still uses your existing Codex login. No model is forced. Install a current CLI and sign in with `codex login`. The app checks PATH and the Codex desktop app's Windows CLI installation, or accepts `RUBBER_DUCK_CODEX` as an executable path.
+- **Claude Code**: Uses plan mode, with only `Read`, `Glob`, and `Grep` available. Slash commands and inherited MCP servers are disabled.
+- **Cursor**: Uses `agent --trust -p --mode ask` or `cursor agent --trust -p --mode ask`. Cursor stays in its read-only Ask mode; the app never passes `--force`.
 
 - **Project root**: The process should see **`AGENTS.md`** in a parent folder. For a packaged build, set **`RUBBER_DUCK_PROJECT_ROOT`** to your clone (the folder that contains `AGENTS.md`).
 - **Claude Code**: Install the CLI, run `claude auth login`, and ensure `claude` is on `PATH` when you start the duck.
