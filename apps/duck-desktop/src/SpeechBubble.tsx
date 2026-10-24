@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface ChatTurn {
   question: string;
@@ -14,6 +14,10 @@ interface SpeechBubbleProps {
   inputPlaceholder?: string;
   onAsk: () => void;
   busy: boolean;
+  stopping: boolean;
+  startedAt: number | null;
+  onStop: () => void;
+  notice: string | null;
   turns: ChatTurn[];
   onNewChat: () => void;
   error: string | null;
@@ -27,11 +31,22 @@ export function SpeechBubble({
   inputPlaceholder = "Describe the bug, your theory, or paste an error…",
   onAsk,
   busy,
+  stopping,
+  startedAt,
+  onStop,
+  notice,
   turns,
   onNewChat,
   error,
 }: SpeechBubbleProps) {
   const conversationRef = useRef<HTMLDivElement>(null);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (startedAt === null) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
   useEffect(() => {
     const conversation = conversationRef.current;
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
@@ -86,12 +101,21 @@ export function SpeechBubble({
             disabled={busy || !inputValue.trim()}
             onClick={onAsk}
           >
-            {busy ? "Thinking…" : "Ask the duck"}
+            {stopping ? "Stopping…" : busy ? "Thinking…" : "Ask the duck"}
           </button>
-          <button type="button" className="speech-bubble-secondary" disabled={busy || (!turns.length && !inputValue && !error)} onClick={onNewChat}>
-            New chat
-          </button>
+          {busy ? (
+            <button type="button" className="speech-bubble-secondary" disabled={stopping} onClick={onStop}>Stop</button>
+          ) : (
+            <button type="button" className="speech-bubble-secondary" disabled={!turns.length && !inputValue && !error} onClick={onNewChat}>
+              New chat
+            </button>
+          )}
         </div>
+        <p className="speech-bubble-status" role="status">
+          {startedAt !== null
+            ? stopping ? "Stopping your local assistant..." : `Waiting for your local assistant. ${Math.max(0, Math.floor((now - startedAt) / 1000))}s of 120s.`
+            : notice}
+        </p>
         {error && (
           <pre className="speech-bubble-error" role="alert">
             {error}

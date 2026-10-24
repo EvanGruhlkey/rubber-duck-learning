@@ -1,5 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+
+mod request;
+use request::{run_cli, RequestControl, Requests};
+
+const COACHING_PROMPT: &str = "You are Rubber Duck, a read-only learning companion. Never edit files or provide paste-ready fixes. For debugging, ask one focused question and offer small hints grounded in files you read. For concept questions, explain in plain language first. Continue the provided conversation and keep replies concise.\n\n";
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -93,7 +98,8 @@ fn is_cli_noise_line(line: &str) -> bool {
     if lower.contains("--trace-deprecation") {
         return true;
     }
-    if lower.contains("is not in the list of known options") && lower.contains("electron/chromium") {
+    if lower.contains("is not in the list of known options") && lower.contains("electron/chromium")
+    {
         return true;
     }
     false
@@ -187,32 +193,32 @@ fn claude_programs() -> Vec<PathBuf> {
 
 fn configure_claude(cmd: &mut Command) {
     cmd.args([
-        "--permission-mode", "plan",
-        "--tools", "Read,Glob,Grep",
+        "--permission-mode",
+        "plan",
+        "--tools",
+        "Read,Glob,Grep",
         "--strict-mcp-config",
         "--disable-slash-commands",
     ]);
 }
 
 /// Claude only gets file-reading and search tools, regardless of project permissions.
-fn try_claude(root: &Path, user: &str) -> Result<String, String> {
-    let args: [&str; 4] = ["-p", user, "--max-turns", "6"];
+fn try_claude(root: &Path, user: &str, control: &RequestControl) -> Result<String, String> {
+    let args = ["-p", "--max-turns", "6"];
 
     let mut last_spawn: Option<String> = None;
     let mut last_run: Option<String> = None;
 
     for program in claude_programs() {
+        control.check()?;
         let mut cmd = cli_command(&program);
-        cmd.current_dir(root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .args(args);
+        cmd.current_dir(root).args(args);
         configure_claude(&mut cmd);
 
-        let out = match cmd.output() {
+        let out = match run_cli(&mut cmd, user, control) {
             Ok(o) => o,
             Err(e) => {
+                control.check()?;
                 last_spawn = Some(format!("{}: {}", program.display(), e));
                 continue;
             }
@@ -238,7 +244,11 @@ fn try_claude(root: &Path, user: &str) -> Result<String, String> {
         last_run = Some(format!(
             "{} returned empty output (stderr): {}",
             program.display(),
-            String::from_utf8_lossy(&out.stderr).trim().chars().take(1200).collect::<String>()
+            String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .chars()
+                .take(1200)
+                .collect::<String>()
         ));
     }
 
@@ -248,9 +258,7 @@ fn try_claude(root: &Path, user: &str) -> Result<String, String> {
 }
 
 /// Cursor agent: prompt is the user’s question only (no `AGENTS.md`—lets the model answer normally).
-fn try_cursor_agent(root: &Path, user: &str) -> Result<String, String> {
-    let prompt = user.to_string();
-
+fn try_cursor_agent(root: &Path, user: &str, control: &RequestControl) -> Result<String, String> {
     let mut last_spawn: Option<String> = None;
     let mut last_run: Option<String> = None;
 
@@ -271,22 +279,20 @@ fn try_cursor_agent(root: &Path, user: &str) -> Result<String, String> {
     }
 
     for program in agent_programs {
+        control.check()?;
         let mut cmd = cli_command(&program);
         cmd.current_dir(root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .arg("--trust")
             .arg("-p")
             .arg("--output-format")
             .arg("text")
             .arg("--mode")
-            .arg("ask")
-            .arg(prompt.as_str());
+            .arg("ask");
 
-        let out = match cmd.output() {
+        let out = match run_cli(&mut cmd, user, control) {
             Ok(o) => o,
             Err(e) => {
+                control.check()?;
                 last_spawn = Some(format!("{}: {}", program.display(), e));
                 continue;
             }
@@ -312,7 +318,11 @@ fn try_cursor_agent(root: &Path, user: &str) -> Result<String, String> {
         last_run = Some(format!(
             "{} returned empty output (stderr): {}",
             program.display(),
-            String::from_utf8_lossy(&out.stderr).trim().chars().take(1200).collect::<String>()
+            String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .chars()
+                .take(1200)
+                .collect::<String>()
         ));
     }
 
@@ -322,28 +332,25 @@ fn try_cursor_agent(root: &Path, user: &str) -> Result<String, String> {
 
     // `cursor agent -p "..."` (some installs only expose `cursor` on PATH)
     for cursor_bin in cursor_programs() {
+        control.check()?;
         if is_cursor_gui_exe(&cursor_bin) {
             continue;
         }
         let mut cmd = cli_command(&cursor_bin);
-        cmd.current_dir(root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .args([
-                "agent",
-                "--trust",
-                "-p",
-                "--output-format",
-                "text",
-                "--mode",
-                "ask",
-            ])
-            .arg(prompt.as_str());
+        cmd.current_dir(root).args([
+            "agent",
+            "--trust",
+            "-p",
+            "--output-format",
+            "text",
+            "--mode",
+            "ask",
+        ]);
 
-        let out = match cmd.output() {
+        let out = match run_cli(&mut cmd, user, control) {
             Ok(o) => o,
             Err(e) => {
+                control.check()?;
                 last_spawn = Some(format!("{} agent: {}", cursor_bin.display(), e));
                 continue;
             }
@@ -369,7 +376,11 @@ fn try_cursor_agent(root: &Path, user: &str) -> Result<String, String> {
         last_run = Some(format!(
             "{} agent returned empty output (stderr): {}",
             cursor_bin.display(),
-            String::from_utf8_lossy(&out.stderr).trim().chars().take(1200).collect::<String>()
+            String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .chars()
+                .take(1200)
+                .collect::<String>()
         ));
     }
 
@@ -412,7 +423,23 @@ fn cursor_programs() -> Vec<PathBuf> {
 }
 
 #[tauri::command]
-fn duck_ask(message: String) -> Result<String, String> {
+async fn duck_ask(
+    message: String,
+    request_id: u64,
+    requests: tauri::State<'_, Requests>,
+) -> Result<String, String> {
+    let control = requests.start(request_id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || answer(&message, &control)).await;
+    requests.finish(request_id)?;
+    result.map_err(|_| "The request failed. Try asking again.".to_string())?
+}
+
+#[tauri::command]
+fn duck_cancel(request_id: u64, requests: tauri::State<'_, Requests>) -> Result<(), String> {
+    requests.cancel(request_id)
+}
+
+fn answer(message: &str, control: &RequestControl) -> Result<String, String> {
     let user = message.trim();
     if user.is_empty() {
         return Err(String::from("Type something first, then press Ask."));
@@ -429,14 +456,17 @@ fn duck_ask(message: String) -> Result<String, String> {
         return Err(format!("Missing {}", agents_path.display()));
     }
 
-    let claude_result = try_claude(&root, user);
+    let prompt = format!("{COACHING_PROMPT}{user}");
+    let claude_result = try_claude(&root, &prompt, control);
+    control.check()?;
     if let Ok(ref text) = claude_result {
         if !text.is_empty() {
             return Ok(text.clone());
         }
     }
 
-    let agent_result = try_cursor_agent(&root, user);
+    let agent_result = try_cursor_agent(&root, &prompt, control);
+    control.check()?;
     if let Ok(ref text) = agent_result {
         if !text.is_empty() {
             return Ok(text.clone());
@@ -460,7 +490,8 @@ fn duck_ask(message: String) -> Result<String, String> {
 pub fn run() {
     load_dotenv_walking_parents();
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![duck_ask])
+        .manage(Requests::default())
+        .invoke_handler(tauri::generate_handler![duck_ask, duck_cancel])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -474,8 +505,12 @@ mod tests {
         let mut cmd = Command::new("claude");
         configure_claude(&mut cmd);
         let args: Vec<_> = cmd.get_args().map(|arg| arg.to_string_lossy()).collect();
-        assert!(args.windows(2).any(|pair| pair == ["--permission-mode", "plan"]));
-        assert!(args.windows(2).any(|pair| pair == ["--tools", "Read,Glob,Grep"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "plan"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--tools", "Read,Glob,Grep"]));
         assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
         assert!(args.iter().any(|arg| arg == "--disable-slash-commands"));
         assert!(!args.iter().any(|arg| arg == "acceptEdits"));

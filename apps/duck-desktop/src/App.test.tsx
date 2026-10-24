@@ -26,6 +26,43 @@ async function openDuck() {
 }
 
 describe("duck conversation", () => {
+  it("opens and hides the panel with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("textbox")).toBeTruthy();
+    await user.keyboard(" ");
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("stops a request, keeps the draft, and ignores a reply arriving during Stop", async () => {
+    let finish: (reply: string) => void = () => { throw new Error("Request was not started"); };
+    vi.mocked(invoke).mockImplementation((command) => command === "duck_cancel"
+      ? Promise.resolve(undefined)
+      : new Promise<string>((resolve) => { finish = resolve; }));
+    const user = await openDuck();
+    await user.type(screen.getByRole("textbox"), "Explain this error");
+    await user.click(screen.getByRole("button", { name: "Ask the duck" }));
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect(invoke).toHaveBeenLastCalledWith("duck_cancel", expect.objectContaining({ requestId: expect.any(Number) }));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /Stopping/ }).disabled).toBe(true);
+    await act(async () => finish("A stale reply"));
+    expect(screen.queryByText("A stale reply")).toBeNull();
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Explain this error");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Ask the duck" }).disabled).toBe(false);
+  });
+
+  it("keeps the question available after a timeout", async () => {
+    vi.mocked(invoke).mockRejectedValue("Request timed out. Try again or ask a shorter question.");
+    const user = await openDuck();
+    await user.type(screen.getByRole("textbox"), "Explain this error");
+    await user.click(screen.getByRole("button", { name: "Ask the duck" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Request timed out. Try again or ask a shorter question.");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Explain this error");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Ask the duck" }).disabled).toBe(false);
+  });
+
   it("keeps a draft when the panel is hidden and reopened", async () => {
     const user = await openDuck();
     await user.type(screen.getByRole("textbox"), "Why does this loop stop?");

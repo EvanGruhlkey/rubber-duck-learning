@@ -52,4 +52,6 @@ Tap the duck for the panel, drag to move, close from the taskbar.
 
 Hiding the panel keeps your draft, replies, and any pending request. Follow-up questions include the previous conversation. **New chat** clears it explicitly. Conversation state stays in memory for this app session and is not saved to disk by the duck; the underlying CLI may keep its own session logs.
 
+While a request runs, the panel shows elapsed time and a **Stop** button. Requests have a two-minute limit across all CLI attempts. Stop and timeout terminate the CLI process group, including child processes, and keep your question available to edit or retry. Requests run off the desktop UI thread. Prompts go through standard input so pasted quotes and shell characters stay literal text.
+
 Run frontend regression tests with `npm test` and backend tests with `cargo test --manifest-path src-tauri/Cargo.toml`.

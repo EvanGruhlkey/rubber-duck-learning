@@ -239,6 +239,18 @@ body {
   border: 1px solid rgba(248, 113, 113, 0.35);
 }
 
+.speech-bubble-status {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.speech-bubble-status:empty {
+  display: none;
+}
+
 .conversation {
   min-height: 0;
   max-height: 160px;
@@ -405,9 +417,10 @@ body {
   flex-shrink: 0;
 }
 
-.duck-hit:focus,
 .duck-hit:focus-visible {
-  outline: none;
+  outline: 2px solid #d97706;
+  outline-offset: 3px;
+  border-radius: 8px;
 }
 
 .duck-hit:hover {
