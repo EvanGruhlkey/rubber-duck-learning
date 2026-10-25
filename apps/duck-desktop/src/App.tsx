@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { SpeechBubble, type ChatTurn, type ModelCatalog, type CatalogState } from "./SpeechBubble";
+import { SpeechBubble, type ModelCatalog, type CatalogState } from "./SpeechBubble";
+import { composeMessage, createSession, replyForSession, type ChatTurn, type ContextAttachment } from "./tutor";
+import { useTutorWorkspace } from "./useTutorWorkspace";
+import { resizePanel } from "./panel";
 import "./App.css";
 
 const DUCK_DRAG_THRESHOLD = 8;
 
-const BUBBLE_HINT =
-  "Ask a question, or describe what you expected and what happened.";
+const EMPTY_SESSION = createSession();
 
 type RequestStatus =
   | { kind: "idle" }
@@ -20,24 +22,32 @@ function errorMessage(error: unknown): string {
 
 export default function App() {
   const [bubbleOpen, setBubbleOpen] = useState(false);
-  const [draft, setDraft] = useState("");
+  const { workspace, updateSession, chooseProject, startFresh, problem, storageError } = useTutorWorkspace();
+  const session = workspace.kind === "ready" ? workspace.session : EMPTY_SESSION;
+  const projectRoot = workspace.kind === "ready" ? workspace.project.root : null;
+  const [picking, setPicking] = useState<"project" | "file" | null>(null);
   const [catalog, setCatalog] = useState<CatalogState>({ kind: "loading" });
   const [model, setModel] = useState("");
   const catalogGeneration = useRef(0);
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState<RequestStatus>({ kind: "idle" });
   const requestRef = useRef<RequestStatus>(request);
   const nextRequestId = useRef(Date.now());
   const [notice, setNotice] = useState<string | null>(null);
   const busy = request.kind !== "idle";
+  const locked = busy || picking !== null;
+
+  useEffect(() => {
+    void resizePanel(bubbleOpen).catch((error: unknown) => setError(`Could not resize the tutor panel: ${String(error)}`));
+  }, [bubbleOpen]);
+
   const refreshModels = useCallback(async () => {
-    if (requestRef.current.kind !== "idle") return;
+    if (requestRef.current.kind !== "idle" || projectRoot === null) return;
     const generation = ++catalogGeneration.current;
     setCatalog({ kind: "loading" });
     setModel("");
     try {
-      const result = await invoke<ModelCatalog>("duck_models");
+      const result = await invoke<ModelCatalog>("duck_models", { project: projectRoot });
       if (generation === catalogGeneration.current) {
         setModel(result.models[0]?.id ?? "");
         setCatalog({ kind: "ready", catalog: result });
@@ -45,7 +55,7 @@ export default function App() {
     } catch (error) {
       if (generation === catalogGeneration.current) setCatalog({ kind: "error", message: errorMessage(error) });
     }
-  }, []);
+  }, [projectRoot]);
 
   useEffect(() => {
     void refreshModels();
@@ -60,8 +70,8 @@ export default function App() {
   }, []);
 
   const onAsk = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || requestRef.current.kind !== "idle" || catalog.kind !== "ready") return;
+    const text = session.draft.trim();
+    if (!text || requestRef.current.kind !== "idle" || picking !== null || projectRoot === null || catalog.kind !== "ready") return;
     const id = ++nextRequestId.current;
     const pending: RequestStatus = { kind: "running", id, startedAt: Date.now() };
     requestRef.current = pending;
@@ -69,22 +79,21 @@ export default function App() {
     setError(null);
     setNotice(null);
     try {
-      const message = turns.length
-        ? `Previous conversation (JSON):\n${JSON.stringify(turns)}\n\nCurrent question:\n${text}`
-        : text;
-      const out = await invoke<string>("duck_ask", { message, model, requestId: id });
-      if (requestRef.current.kind === "running") {
-        setTurns((previous) => [...previous, { question: text, answer: out }]);
-        setDraft("");
+      const message = composeMessage(session, text);
+      const out = await invoke<string>("duck_ask", { message, model, mode: session.mode, project: projectRoot, requestId: id });
+      if (requestRef.current.kind === "running" && requestRef.current.id === id) {
+        const turn: ChatTurn = { id: crypto.randomUUID(), question: text, answer: replyForSession(out), mode: session.mode, attachments: session.attachments };
+        updateSession((previous) => ({ ...previous, turns: [...previous.turns, turn].slice(-40), draft: "", attachments: [] }), projectRoot);
       }
     } catch (e) {
-      if (requestRef.current.kind !== "stopping") setError(errorMessage(e));
+      if (requestRef.current.kind === "running" && requestRef.current.id === id) setError(errorMessage(e));
     } finally {
+      if (!("id" in requestRef.current) || requestRef.current.id !== id) return;
       if (requestRef.current.kind === "stopping") setNotice("Stopped. Your question is still here.");
       requestRef.current = { kind: "idle" };
       setRequest({ kind: "idle" });
     }
-  }, [draft, turns, model, catalog]);
+  }, [session, picking, projectRoot, model, catalog, updateSession]);
 
   const onStop = useCallback(async () => {
     const current = requestRef.current;
@@ -105,11 +114,31 @@ export default function App() {
 
   const onNewChat = useCallback(() => {
     if (requestRef.current.kind !== "idle") return;
-    setTurns([]);
-    setDraft("");
+    updateSession((previous) => ({ ...previous, turns: [], draft: "", attachments: [] }));
     setError(null);
     setNotice(null);
-  }, []);
+  }, [updateSession]);
+
+  const onChooseProject = useCallback(async () => {
+    if (requestRef.current.kind !== "idle" || picking !== null) return;
+    setPicking("project");
+    setError(null);
+    setNotice(null);
+    try { await chooseProject(); } finally { setPicking(null); }
+  }, [chooseProject, picking]);
+
+  const onAttachFile = useCallback(async () => {
+    if (requestRef.current.kind !== "idle" || picking !== null || projectRoot === null || session.attachments.length >= 3) return;
+    setPicking("file");
+    try {
+      const context = await invoke<{ path: string; text: string } | null>("duck_attach_file", { project: projectRoot, path: null });
+      if (context) {
+        const attachment: ContextAttachment = { id: crypto.randomUUID(), kind: "file", label: context.path, text: context.text };
+        updateSession((previous) => ({ ...previous, attachments: [...previous.attachments, attachment].slice(0, 3) }), projectRoot);
+      }
+    } catch (error) { setError(errorMessage(error)); }
+    finally { setPicking(null); }
+  }, [picking, projectRoot, session.attachments.length, updateSession]);
 
   const onRootPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -185,18 +214,23 @@ export default function App() {
               model={model}
               onModelChange={setModel}
               onRefreshModels={refreshModels}
-              message={BUBBLE_HINT}
-              inputValue={draft}
-              onInputChange={setDraft}
+              workspace={workspace}
+              onSessionChange={updateSession}
+              onChooseProject={onChooseProject}
+              onAttachFile={onAttachFile}
+              onHide={() => setBubbleOpen(false)}
+              locked={locked}
+              picking={picking}
+              storageError={storageError}
+              onStartFresh={startFresh}
               onAsk={onAsk}
               busy={busy}
               stopping={request.kind === "stopping"}
               startedAt={request.kind === "idle" ? null : request.startedAt}
               onStop={onStop}
               notice={notice}
-              turns={turns}
               onNewChat={onNewChat}
-              error={error}
+              error={error ?? problem}
             />
           )}
         </div>

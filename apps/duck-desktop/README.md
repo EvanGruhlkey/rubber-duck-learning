@@ -16,7 +16,7 @@ Codex catalogs come from `codex debug models`, with hidden entries excluded. Cla
 - **Claude Code**: Uses plan mode, with only `Read`, `Glob`, and `Grep` available. Slash commands and inherited MCP servers are disabled.
 - **Cursor**: Uses `agent --trust -p --mode ask` or `cursor agent --trust -p --mode ask`. Cursor stays in its read-only Ask mode; the app never passes `--force`.
 
-- **Project root**: The process should see **`AGENTS.md`** in a parent folder. For a packaged build, set **`RUBBER_DUCK_PROJECT_ROOT`** to your clone (the folder that contains `AGENTS.md`).
+- **Project root**: Click the project name to choose a folder. New projects do not need Git or `AGENTS.md`. The selected folder is the CLI working directory. On first launch, `RUBBER_DUCK_PROJECT_ROOT` or a parent containing `AGENTS.md` supplies the initial folder when available.
 - **Claude Code**: Install the CLI, run `claude auth login`, and ensure `claude` is on `PATH` when you start the duck.
 - **Cursor**: Install the Cursor CLI and sign in (e.g. `agent login`). On Windows the app may prepend `%LOCALAPPDATA%\cursor-agent` to `PATH` so `agent` is found. Auth is whatever the CLI uses—this app does not store API keys.
 
@@ -37,7 +37,7 @@ npm run tauri:dev
 
 `npm run tauri:*` goes through `scripts/tauri-env.mjs`, which sets **`CARGO_TARGET_DIR`** outside OneDrive by default on Windows to avoid MSVC PDB issues when the repo lives under OneDrive. Override with your own **`CARGO_TARGET_DIR`** if you want.
 
-Pedagogy for assistants in the repo: [`AGENTS.md`](../../AGENTS.md) (the app only uses it to locate the project root; your message is not rewritten by that file).
+Pedagogy for assistants in the repo: [`AGENTS.md`](../../AGENTS.md). The app supplies its own mode instructions to the CLI.
 
 ## Icons
 
@@ -58,7 +58,11 @@ npm run tauri:build
 
 Tap the duck for the panel, drag to move, close from the taskbar.
 
-Hiding the panel keeps your draft, replies, and any pending request. Follow-up questions include the previous conversation. **New chat** clears it explicitly. Conversation state stays in memory for this app session and is not saved to disk by the duck; the underlying CLI may keep its own session logs.
+Chat is the main view. Choose **Ideate** to clarify an idea, **Build** to work through a plan, or **Debug** to investigate a failure. **Progress** opens the optional goal, checklist, and notes. Suggested plans require explicit adoption; only the learner checks off completed steps. The tutor remains read-only in every mode.
+
+**Add context** attaches a project file, pasted code, or an error. Each message accepts up to three attachments. Project files must be UTF-8 text inside the selected folder and no larger than 64 KiB. Attached snapshots remain visible with the submitted question. If CLI file tools are unavailable under the host's read-only policy, attach the relevant files explicitly.
+
+Hiding the panel keeps your draft, replies, and any pending request. Each project's mode, goal, checklist, notes, draft, attachments, and latest 40 exchanges are saved in local WebView storage and restored on restart. Follow-ups include the latest eight exchanges. Storage failures appear in the panel. **New chat** clears the conversation and draft while retaining the goal, plan, and notes. The underlying CLI may also keep its own session logs.
 
 While a request runs, the panel shows elapsed time and a **Stop** button. Requests have a two-minute limit across all CLI attempts. Stop and timeout terminate the CLI process group, including child processes, and keep your question available to edit or retry. Requests run off the desktop UI thread. Prompts go through standard input so pasted quotes and shell characters stay literal text.
 
