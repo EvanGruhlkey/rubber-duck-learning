@@ -377,7 +377,21 @@ body {
 .project-picker { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .project-caption { color: #78716c; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
 .project-picker strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
-.hide-panel { border: 1px solid #a8a29e; border-radius: 8px; padding: 5px 9px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.hide-panel { position: absolute; right: 9px; top: 8px; border: 0; border-radius: 8px; padding: 2px 7px; background: transparent; color: inherit; font: inherit; font-size: 17px; cursor: pointer; z-index: 1; }
+.composer-options { display: flex; gap: 8px; padding-right: 20px; margin-bottom: 6px; flex-shrink: 0; }
+.composer-options select { min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; padding: 3px 0; }
+.composer-options select:first-child { flex: 1; }
+.composer-options option { color: #1c1917; background: #fffcf5; }
+.view-compose .speech-bubble-inner { height: auto; align-self: flex-end; }
+.view-compose:has(.context-toggle[aria-expanded="true"]) .speech-bubble-inner { overflow-y: auto; }
+.view-compose .tutor-composer { margin-top: 0; }
+.view-output .speech-bubble-inner { padding-top: 33px; }
+.view-output .tutor-content { min-height: 0; }
+.view-output .conversation { height: auto; }
+.output-actions { display: flex; justify-content: flex-end; flex-shrink: 0; }
+.reply-button, .progress-back { border: 0; border-radius: 50%; width: 30px; height: 30px; background: transparent; color: inherit; font-size: 22px; cursor: pointer; }
+.reply-button:hover, .progress-back:hover { background: #a8a29e22; }
+.progress-back { flex-shrink: 0; margin-top: -8px; }
 .model-settings { margin: 7px 0 10px; flex-shrink: 0; font-size: 11px; }
 .model-settings summary { cursor: pointer; color: #78716c; }
 .model-settings .agent-picker { margin: 8px 0; }
@@ -409,6 +423,7 @@ body {
 .review-plan, .compact-actions button, .step-actions button, .add-step button, .context-item button, .context-toggle, .save-error button { padding: 5px 8px; border: 1px solid #a8a29e88; border-radius: 7px; background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
 .review-plan { margin-top: 8px; border-color: #d97706; }
 .compact-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.workspace-actions { display: contents; }
 .context-composer { grid-row: 2; grid-column: 1; max-height: 190px; overflow: auto; }
 .context-toggle { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; font-size: 25px; text-decoration: none; }
 .context-toggle:hover { background: #a8a29e22; }

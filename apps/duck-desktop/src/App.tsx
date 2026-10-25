@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SpeechBubble, type ModelCatalog, type CatalogState } from "./SpeechBubble";
 import { composeMessage, createSession, replyForSession, type ChatTurn, type ContextAttachment } from "./tutor";
 import { useTutorWorkspace } from "./useTutorWorkspace";
-import { resizePanel } from "./panel";
+import { resizePanel, type PanelView } from "./panel";
 import "./App.css";
 
 const DUCK_DRAG_THRESHOLD = 8;
@@ -22,6 +22,8 @@ function errorMessage(error: unknown): string {
 
 export default function App() {
   const [bubbleOpen, setBubbleOpen] = useState(false);
+  const [panelView, setPanelView] = useState<PanelView>("compose");
+  const [outputHeight, setOutputHeight] = useState(260);
   const { workspace, updateSession, chooseProject, startFresh, problem, storageError } = useTutorWorkspace();
   const session = workspace.kind === "ready" ? workspace.session : EMPTY_SESSION;
   const projectRoot = workspace.kind === "ready" ? workspace.project.root : null;
@@ -39,8 +41,9 @@ export default function App() {
   const locked = busy || picking !== null;
 
   useEffect(() => {
-    void resizePanel(bubbleOpen).catch((error: unknown) => setError(`Could not resize the tutor panel: ${String(error)}`));
-  }, [bubbleOpen]);
+    void resizePanel(bubbleOpen, panelView, outputHeight).catch((error: unknown) => setError(`Could not resize the tutor panel: ${String(error)}`));
+  }, [bubbleOpen, panelView, outputHeight]);
+  useEffect(() => { setPanelView("compose"); }, [projectRoot]);
 
   const refreshModels = useCallback(async () => {
     if (requestRef.current.kind !== "idle" || projectRoot === null) return;
@@ -80,6 +83,8 @@ export default function App() {
     setError(null);
     setNotice(null);
     setStreamedReply("");
+    setOutputHeight(260);
+    setPanelView("output");
     try {
       const message = composeMessage(session, text);
       const onReply = new Channel<string>();
@@ -92,10 +97,10 @@ export default function App() {
         updateSession((previous) => ({ ...previous, turns: [...previous.turns, turn].slice(-40), draft: "", attachments: [] }), projectRoot);
       }
     } catch (e) {
-      if (requestRef.current.kind === "running" && requestRef.current.id === id) setError(errorMessage(e));
+      if (requestRef.current.kind === "running" && requestRef.current.id === id) { setError(errorMessage(e)); setPanelView("compose"); }
     } finally {
       if (!("id" in requestRef.current) || requestRef.current.id !== id) return;
-      if (requestRef.current.kind === "stopping") setNotice("Stopped. Your question is still here.");
+      if (requestRef.current.kind === "stopping") { setNotice("Stopped."); setPanelView("compose"); }
       requestRef.current = { kind: "idle" };
       setRequest({ kind: "idle" });
     }
@@ -123,6 +128,7 @@ export default function App() {
     updateSession((previous) => ({ ...previous, turns: [], draft: "", attachments: [] }));
     setError(null);
     setNotice(null);
+    setPanelView("compose");
   }, [updateSession]);
 
   const onChooseProject = useCallback(async () => {
@@ -216,6 +222,9 @@ export default function App() {
         <div className="stage-bubble-slot">
           {bubbleOpen && (
             <SpeechBubble
+              view={panelView}
+              onViewChange={setPanelView}
+              onOutputHeight={setOutputHeight}
               catalog={catalog}
               model={model}
               onModelChange={setModel}
@@ -233,7 +242,6 @@ export default function App() {
               busy={busy}
               streamedReply={streamedReply}
               stopping={request.kind === "stopping"}
-              startedAt={request.kind === "idle" ? null : request.startedAt}
               onStop={onStop}
               notice={notice}
               onNewChat={onNewChat}

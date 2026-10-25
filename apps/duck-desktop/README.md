@@ -16,7 +16,7 @@ Codex catalogs come from `codex debug models`, with hidden entries excluded. Cla
 - **Claude Code**: Uses plan mode, with only `Read`, `Glob`, and `Grep` available. Slash commands and inherited MCP servers are disabled.
 - **Cursor**: Uses `agent --trust -p --mode ask` or `cursor agent --trust -p --mode ask`. Cursor stays in its read-only Ask mode; the app never passes `--force`.
 
-- **Project root**: Click the project name to choose a folder. New projects do not need Git or `AGENTS.md`. The selected folder is the CLI working directory. On first launch, `RUBBER_DUCK_PROJECT_ROOT` or a parent containing `AGENTS.md` supplies the initial folder when available.
+- **Project root**: Open **+**, then choose the folder option. New projects do not need Git or `AGENTS.md`. The selected folder is the CLI working directory. On first launch, `RUBBER_DUCK_PROJECT_ROOT` or a parent containing `AGENTS.md` supplies the initial folder when available.
 - **Claude Code**: Install the CLI, run `claude auth login`, and ensure `claude` is on `PATH` when you start the duck.
 - **Cursor**: Install the Cursor CLI and sign in (e.g. `agent login`). On Windows the app may prepend `%LOCALAPPDATA%\cursor-agent` to `PATH` so `agent` is found. Auth is whatever the CLI uses—this app does not store API keys.
 
@@ -58,9 +58,11 @@ npm run tauri:build
 
 Tap the duck for the panel, drag to move, close from the taskbar.
 
-Chat is the main view. Choose **Ideate** to clarify an idea, **Build** to work through a plan, or **Debug** to investigate a failure. **Progress** opens the optional goal, checklist, and notes. Suggested plans require explicit adoption; only the learner checks off completed steps. The tutor remains read-only in every mode. Enter sends a message; Shift+Enter adds a line. The arrow sends, the square stops, and **…** appears until reply text arrives.
+The input view shows model and mode directly above the textbox. Choose **Ideate** to clarify an idea, **Build** to work through a plan, or **Debug** to investigate a failure. Enter replaces the input view with an output-only speech bubble. **…** appears until reply text arrives. The reply arrow brings the input back; the square stops a running reply. Shift+Enter adds a line.
 
-The **+** menu attaches a project file, pasted code, or an error. Each message accepts up to three attachments. Project files must be UTF-8 text inside the selected folder and no larger than 64 KiB. Attached snapshots remain visible with the submitted question. If CLI file tools are unavailable under the host's read-only policy, attach the relevant files explicitly.
+The **+** menu also holds the folder picker, last reply, new chat, model reload, and **Progress** for goals, checklists, and notes. Suggested plans require explicit adoption; only the learner checks off completed steps. The tutor remains read-only in every mode.
+
+The **+** menu attaches a project file, pasted code, or an error. Each message accepts up to three attachments. Project files must be UTF-8 text inside the selected folder and no larger than 64 KiB. Snapshots are saved with the submitted question for follow-up context. If CLI file tools are unavailable under the host's read-only policy, attach the relevant files explicitly.
 
 Hiding the panel keeps your draft, replies, and any pending request. Each project's mode, goal, checklist, notes, draft, attachments, and latest 40 exchanges are saved in local WebView storage and restored on restart. Follow-ups include the latest eight exchanges. Storage failures appear in the panel. **New chat** clears the conversation and draft while retaining the goal, plan, and notes. The underlying CLI may also keep its own session logs.
 

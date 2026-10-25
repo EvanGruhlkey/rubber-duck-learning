@@ -57,9 +57,25 @@ async function openDuck() {
   return user;
 }
 
+async function showInput(user: ReturnType<typeof userEvent.setup>) {
+  const reply = screen.queryByRole("button", { name: "Reply" });
+  const back = screen.queryByRole("button", { name: "Back to input" });
+  if (reply) await user.click(reply);
+  else if (back) await user.click(back);
+}
+
+async function openMore(user: ReturnType<typeof userEvent.setup>) {
+  await showInput(user);
+  const plus = screen.getByRole("button", { name: "Add context" });
+  if (screen.queryByRole("button", { name: "Choose project" })) return;
+  if (plus.getAttribute("aria-expanded") === "true") await user.click(plus);
+  await user.click(plus);
+}
+
 async function showProgress(user: ReturnType<typeof userEvent.setup>) {
-  const button = screen.queryByRole("button", { name: /^Progress/ });
-  if (button) await user.click(button);
+  if (screen.queryByRole("textbox", { name: "Goal" })) return;
+  await openMore(user);
+  await user.click(screen.getByRole("button", { name: "Progress" }));
 }
 
 async function showNotes(user: ReturnType<typeof userEvent.setup>) {
@@ -79,7 +95,9 @@ describe("duck conversation", () => {
     expect(screen.getByRole("button", { name: "Add context" }).textContent).toBe("+");
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "Explain a loop{Enter}");
     expect(screen.getByRole("status", { name: "Thinking" }).textContent).toBe("…");
-    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your input" }).value).toBe("");
+    expect(screen.queryByRole("textbox", { name: "Your input" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Mode" })).toBeNull();
     act(() => reply("A loop"));
     expect(screen.queryByRole("status", { name: "Thinking" })).toBeNull();
     expect(screen.getByLabelText("Current reply").textContent).toBe("A loop");
@@ -90,6 +108,11 @@ describe("duck conversation", () => {
     act(() => reply("Late output"));
     expect(screen.queryByText("Late output")).toBeNull();
     expect(screen.getAllByText("A loop repeats.")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Reply" }));
+    expect(screen.getByRole("textbox", { name: "Your input" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Mode" })).toBeTruthy();
+    expect(screen.queryByText("A loop repeats.")).toBeNull();
   });
   it("keeps chat simple and restores controls when a project chooser is cancelled", async () => {
     let cancelPicker: (value: null) => void = () => { throw new Error("Picker was not opened"); };
@@ -98,10 +121,12 @@ describe("duck conversation", () => {
     expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Goal" })).toBeNull();
     expect(screen.getByRole("combobox", { name: "Mode" })).toBeTruthy();
+    await openMore(user);
     await user.click(screen.getByRole("button", { name: "Choose project" }));
     expect(await screen.findByText("Choose or cancel a folder in the open dialog.")).toBeTruthy();
     await act(async () => cancelPicker(null));
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your input" }).disabled).toBe(false);
+    await openMore(user);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose project" }).disabled).toBe(false);
   });
   it("does not carry an unfinished pasted selection into a different project", async () => {
@@ -110,8 +135,10 @@ describe("duck conversation", () => {
     await user.click(screen.getByRole("button", { name: "Add context" }));
     await user.click(screen.getByRole("button", { name: "Paste code" }));
     await user.type(screen.getByRole("textbox", { name: "Code selection" }), "Private to project A");
+    await openMore(user);
     await user.click(screen.getByRole("button", { name: "Choose project" }));
-    await screen.findByText("other");
+    await openMore(user);
+    expect(screen.getByRole("button", { name: "Choose project" }).textContent).toContain("other");
     expect(screen.queryByRole("textbox", { name: "Code selection" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Attach" })).toBeNull();
   });
@@ -120,6 +147,7 @@ describe("duck conversation", () => {
     const user = await openDuck();
     await showProgress(user);
     await user.type(screen.getByRole("textbox", { name: "Goal" }), "Add login");
+    await showInput(user);
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "Help me plan login");
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
     await user.click(await screen.findByRole("button", { name: "Review suggested plan" }));
@@ -150,19 +178,26 @@ describe("duck conversation", () => {
     const user = await openDuck();
     await showProgress(user);
     await user.type(screen.getByRole("textbox", { name: "Goal" }), "Goal A");
+    await showInput(user);
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "Draft A");
+    await openMore(user);
     await user.click(screen.getByRole("button", { name: "Choose project" }));
-    await screen.findByText("other");
+    await openMore(user);
+    expect(screen.getByRole("button", { name: "Choose project" }).textContent).toContain("other");
     await showProgress(user);
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Goal" }).value).toBe("");
+    await showInput(user);
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your input" }).value).toBe("");
     await user.selectOptions(screen.getByRole("combobox", { name: "Mode" }), "ideate");
     await showProgress(user);
     await user.type(screen.getByRole("textbox", { name: "Goal" }), "Goal B");
+    await openMore(user);
     await user.click(screen.getByRole("button", { name: "Choose project" }));
-    await screen.findByText("example");
+    await openMore(user);
+    expect(screen.getByRole("button", { name: "Choose project" }).textContent).toContain("example");
     await showProgress(user);
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Goal" }).value).toBe("Goal A");
+    await showInput(user);
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your input" }).value).toBe("Draft A");
     expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Mode" }).value).toBe("build");
   });
@@ -179,7 +214,7 @@ describe("duck conversation", () => {
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
     await screen.findByText("What input triggers that error?");
     expect(invoke).toHaveBeenCalledWith("duck_ask", expect.objectContaining({ mode: "debug", project: project.root, message: expect.stringContaining("TypeError: missing user") }));
-    expect(screen.getByText("Pasted error")).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(`rubber-duck.session.v1:${project.root}`) ?? "null").turns[0].attachments[0].text).toBe("TypeError: missing user");
     expect(screen.queryByRole("button", { name: "Remove Pasted error" })).toBeNull();
   });
 
@@ -194,8 +229,8 @@ describe("duck conversation", () => {
     expect(invoke).toHaveBeenCalledWith("duck_attach_file", { project: project.root, path: null });
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "Explain this file");
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Choose project" }).disabled).toBe(true);
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Mode" }).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Choose project" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Mode" })).toBeNull();
     expect(invoke).toHaveBeenCalledWith("duck_ask", expect.objectContaining({ message: expect.stringContaining("const enabled = false;") }));
     await act(async () => finish("What would you expect enabled to control?"));
   });
@@ -214,7 +249,7 @@ describe("duck conversation", () => {
   it("blocks requests when the launching IDE cannot be detected", async () => {
     modelList.mockRejectedValueOnce("Could not detect your IDE.");
     const user = await openDuck();
-    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Could not detect your IDE.");
+    expect((await screen.findByRole("alert")).textContent).toContain("Could not detect your IDE.");
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "Explain loops");
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Ask the duck" }).disabled).toBe(true);
     expect(ask).not.toHaveBeenCalled();
@@ -223,7 +258,7 @@ describe("duck conversation", () => {
   it("offers only the IDE default if discovery fails without inventing other models", async () => {
     modelList.mockResolvedValueOnce({ ide: "claude", models: [], warning: "Model list unavailable. Using your IDE's default." });
     await openDuck();
-    expect(await screen.findByText(/^Claude Code/)).toBeTruthy();
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Model" }).title).toBe("Claude Code");
     expect(within(screen.getByRole("combobox", { name: "Model" })).getAllByRole("option").map((option) => option.textContent)).toEqual(["CLI default"]);
     expect(screen.getByText("Model list unavailable. Using your IDE's default.")).toBeTruthy();
   });
@@ -231,7 +266,7 @@ describe("duck conversation", () => {
   it("keeps every model family available through Cursor", async () => {
     modelList.mockResolvedValueOnce({ ide: "cursor", models: [{ id: "gpt-example", label: "GPT Example" }, { id: "claude-example", label: "Claude Example" }, { id: "composer-example", label: "Composer Example" }], warning: null });
     await openDuck();
-    expect(await screen.findByText(/^Cursor/)).toBeTruthy();
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Model" }).title).toBe("Cursor");
     expect(within(screen.getByRole("combobox", { name: "Model" })).getAllByRole("option").map((option) => option.textContent)).toEqual(["GPT Example", "Claude Example", "Composer Example"]);
   });
 
@@ -247,9 +282,9 @@ describe("duck conversation", () => {
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "Explain loops");
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
     expect(invoke).toHaveBeenCalledWith("duck_ask", expect.objectContaining({ model: "gpt-example-b", mode: "build", project: project.root, message: expect.stringContaining("Explain loops") }));
-    expect(picker.disabled).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
     await act(async () => finish("A loop repeats a step."));
-    expect(picker.disabled).toBe(false);
+    await showInput(user);
     await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
     await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
     expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Model" }).value).toBe("gpt-example-b");
@@ -307,6 +342,7 @@ describe("duck conversation", () => {
     await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
     await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
     expect(screen.getByText("What is the loop condition?")).toBeTruthy();
+    await showInput(user);
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "It checks i < 3");
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
     await screen.findByText("Trace the first iteration.");
@@ -335,6 +371,7 @@ describe("duck conversation", () => {
     await user.type(screen.getByRole("textbox", { name: "Your input" }), "I am stuck");
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
     await screen.findByText("What have you tried?");
+    await openMore(user);
     await user.click(screen.getByRole("button", { name: "New chat" }));
     expect(screen.queryByText("What have you tried?")).toBeNull();
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your input" }).value).toBe("");

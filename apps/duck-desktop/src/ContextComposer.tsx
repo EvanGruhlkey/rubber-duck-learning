@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { TutorSession } from "./tutor";
 
-interface Props { session: TutorSession; locked: boolean; onAttachFile: () => void; onChange: (update: (session: TutorSession) => TutorSession) => void }
-export function ContextComposer({ session, locked, onAttachFile, onChange }: Props) {
+interface Props { session: TutorSession; locked: boolean; onAttachFile: () => void; onChange: (update: (session: TutorSession) => TutorSession) => void; children?: ReactNode }
+export function ContextComposer({ session, locked, onAttachFile, onChange, children }: Props) {
   const [adding, setAdding] = useState<"menu" | "code" | "error" | null>(null);
   const [text, setText] = useState("");
   return <div className="context-composer">
@@ -10,11 +10,12 @@ export function ContextComposer({ session, locked, onAttachFile, onChange }: Pro
       <details><summary>{context.label}</summary><pre>{context.text}</pre></details>
       <button type="button" disabled={locked} aria-label={`Remove ${context.label}`} onClick={() => onChange((previous) => ({ ...previous, attachments: previous.attachments.filter((item) => item.id !== context.id) }))}>×</button>
     </div>)}</div>}
-    <button type="button" className="context-toggle" aria-label="Add context" title="Add context" aria-expanded={adding !== null} disabled={locked || session.attachments.length >= 3} onClick={() => setAdding(adding === null ? "menu" : null)}>+</button>
+    <button type="button" className="context-toggle" aria-label="Add context" title="More" aria-expanded={adding !== null} disabled={locked} onClick={() => setAdding(adding === null ? "menu" : null)}>+</button>
     {adding === "menu" && <div className="compact-actions">
-      <button type="button" disabled={locked} onClick={() => { setAdding(null); onAttachFile(); }}>Project file</button>
-      <button type="button" onClick={() => setAdding("code")}>Paste code</button>
-      <button type="button" onClick={() => setAdding("error")}>Paste error</button>
+      <button type="button" disabled={locked || session.attachments.length >= 3} onClick={() => { setAdding(null); onAttachFile(); }}>Project file</button>
+      <button type="button" disabled={session.attachments.length >= 3} onClick={() => setAdding("code")}>Paste code</button>
+      <button type="button" disabled={session.attachments.length >= 3} onClick={() => setAdding("error")}>Paste error</button>
+      <div className="workspace-actions" onClick={() => setAdding(null)}>{children}</div>
     </div>}
     {(adding === "code" || adding === "error") && <div className="paste-context">
       <label htmlFor="pasted-context">{adding === "code" ? "Code selection" : "Error output"}</label>
