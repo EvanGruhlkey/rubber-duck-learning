@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 pub struct RequestControl {
     cancelled: AtomicBool,
     deadline: Instant,
+    output: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
 }
 
 impl RequestControl {
@@ -18,11 +19,22 @@ impl RequestControl {
         Self {
             cancelled: AtomicBool::new(false),
             deadline: Instant::now() + timeout,
+            output: Mutex::new(None),
         }
     }
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn stream_to(&self, output: impl Fn(String) + Send + Sync + 'static) {
+        *self.output.lock().expect("output lock") = Some(Arc::new(output));
+    }
+
+    pub fn publish(&self, text: String) {
+        if let Some(output) = self.output.lock().expect("output lock").as_ref() {
+            output(text);
+        }
     }
 
     pub fn check(&self) -> Result<(), String> {
@@ -114,7 +126,28 @@ pub fn run_cli(
     group.creation_flags(0x0800_0000).kill_on_drop(true);
     let mut child = group.spawn().map_err(|e| e.to_string())?;
     let mut stdin = child.inner().stdin.take().expect("piped stdin");
-    let stdout = read_pipe(child.inner().stdout.take().expect("piped stdout"));
+    let mut pipe = child.inner().stdout.take().expect("piped stdout");
+    let output = control.output.lock().expect("output lock").clone();
+    let stdout = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 4096];
+        loop {
+            let count = pipe.read(&mut chunk)?;
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+            if let Some(output) = &output {
+                // Keep split UTF-8 characters for the next read instead of displaying replacement glyphs.
+                let valid = match std::str::from_utf8(&bytes) {
+                    Ok(text) => text,
+                    Err(error) => std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap_or(""),
+                };
+                output(valid.chars().take(100_000).collect());
+            }
+        }
+        Ok::<_, std::io::Error>(bytes)
+    });
     let stderr = read_pipe(child.inner().stderr.take().expect("piped stderr"));
     let prompt = prompt.to_owned();
     let input = thread::spawn(move || stdin.write_all(prompt.as_bytes()));
@@ -157,6 +190,35 @@ pub fn query_cli(
     complete: impl Fn(&str) -> bool,
     control: &RequestControl,
 ) -> Result<String, String> {
+    let mut output = String::new();
+    converse_cli(
+        cmd,
+        input,
+        |line| {
+            output.push_str(line);
+            output.push('\n');
+            Ok(if complete(line) {
+                Dialogue::Done(output.clone())
+            } else {
+                Dialogue::Continue
+            })
+        },
+        control,
+    )
+}
+
+pub enum Dialogue {
+    Continue,
+    Send(String),
+    Done(String),
+}
+
+pub fn converse_cli(
+    cmd: &mut Command,
+    input: &str,
+    mut on_line: impl FnMut(&str) -> Result<Dialogue, String>,
+    control: &RequestControl,
+) -> Result<String, String> {
     use std::io::{BufRead, BufReader};
     use std::sync::mpsc;
     control.check()?;
@@ -183,21 +245,25 @@ pub fn query_cli(
             .write_all(input.as_bytes())
             .map_err(|error| error.to_string())?;
         stdin.flush().map_err(|error| error.to_string())?;
-        let mut output = String::new();
         loop {
             control.check()?;
             match receive.recv_timeout(Duration::from_millis(40)) {
                 Ok(line) => {
                     let line = line.map_err(|error| error.to_string())?;
-                    output.push_str(&line);
-                    output.push('\n');
-                    if complete(&line) {
-                        return Ok(output);
+                    match on_line(&line)? {
+                        Dialogue::Continue => {}
+                        Dialogue::Send(input) => {
+                            stdin
+                                .write_all(input.as_bytes())
+                                .map_err(|error| error.to_string())?;
+                            stdin.flush().map_err(|error| error.to_string())?;
+                        }
+                        Dialogue::Done(output) => return Ok(output),
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("The IDE CLI closed before returning its models.".into())
+                    return Err("The IDE CLI closed before completing its response.".into())
                 }
             }
         }
@@ -272,6 +338,32 @@ mod tests {
         assert!(output.status.success());
         assert_eq!(String::from_utf8(output.stdout).unwrap(), prompt);
         assert_eq!(output.stderr, b"diagnostic");
+    }
+
+    #[test]
+    fn streams_stdout_before_exit_without_sending_diagnostics() {
+        #[cfg(windows)]
+        let mut cmd = shell("[Console]::Out.Write('First'); [Console]::Out.Flush(); [Console]::Error.Write('private diagnostic'); Start-Sleep -Milliseconds 700; [Console]::Out.Write(' reply')");
+        #[cfg(not(windows))]
+        let mut cmd =
+            shell("printf First; printf 'private diagnostic' >&2; sleep 1; printf ' reply'");
+        let control = Arc::new(RequestControl::new(Duration::from_secs(10)));
+        let (send, receive) = std::sync::mpsc::channel();
+        control.stream_to(move |text| {
+            let _ = send.send(text);
+        });
+        let running = thread::spawn(move || run_cli(&mut cmd, "", &control).unwrap());
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "First"
+        );
+        assert!(
+            !running.is_finished(),
+            "reply should be visible while the CLI is still running"
+        );
+        let result = running.join().unwrap();
+        assert_eq!(result.stdout, b"First reply");
+        assert_eq!(receive.into_iter().last().unwrap(), "First reply");
     }
 
     #[test]

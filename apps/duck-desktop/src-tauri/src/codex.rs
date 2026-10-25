@@ -4,35 +4,6 @@ use crate::{
     trim_env_path,
 };
 use std::path::{Path, PathBuf};
-use std::process::Command;
-
-fn configure(cmd: &mut Command, model: &str) {
-    cmd.args([
-        "--no-daemon",
-        "--ask-for-approval",
-        "never",
-        "exec",
-        "--sandbox",
-        "read-only",
-        "--ephemeral",
-        "--skip-git-repo-check",
-        "--ignore-user-config",
-        "--disable",
-        "apps",
-        "--disable",
-        "plugins",
-        "--disable",
-        "hooks",
-        "-c",
-        "mcp_servers={}",
-        "--color",
-        "never",
-    ]);
-    if !model.is_empty() {
-        cmd.args(["--model", model]);
-    }
-    cmd.arg("-");
-}
 
 fn programs() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
@@ -108,63 +79,67 @@ pub fn ask(
                 .into(),
         );
     }
-    let mut last_error = String::new();
-    for program in programs {
-        control.check()?;
-        let mut cmd = cli_command(&program);
-        cmd.current_dir(root);
-        configure(&mut cmd, model);
-        let output = match run_cli(&mut cmd, prompt, control) {
-            Ok(output) => output,
-            Err(error) => {
-                control.check()?;
-                last_error = format!("{}: {error}", program.display());
-                continue;
-            }
-        };
-        // Codex sends progress and diagnostics to stderr, and only its answer to stdout.
-        if !output.status.success() {
-            return Err(format!(
-                "Codex exited with {}.\n{}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        let reply = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        return if reply.is_empty() {
-            Err("Codex returned no answer. Check `codex login status` in a terminal.".into())
-        } else {
-            Ok(reply)
-        };
-    }
-    Err(last_error)
+    let program = &programs[0];
+    let mut cmd = cli_command(program);
+    cmd.current_dir(root);
+    crate::codex_stream::configure(&mut cmd);
+    crate::codex_stream::ask(&mut cmd, root, prompt, model, control)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    #[test]
+    #[ignore = "requires a signed-in Codex CLI and RUBBER_DUCK_TEST_MODEL"]
+    fn streams_a_real_cli_reply() {
+        use std::{
+            sync::{Arc, Mutex},
+            time::{Duration, Instant},
+        };
+        let root = std::env::current_dir().unwrap();
+        let model = std::env::var("RUBBER_DUCK_TEST_MODEL").expect("choose an available CLI model");
+        let control = RequestControl::new(Duration::from_secs(120));
+        let start = Instant::now();
+        let chunks = Arc::new(Mutex::new(Vec::new()));
+        let observed = chunks.clone();
+        control.stream_to(move |text| observed.lock().unwrap().push((start.elapsed(), text)));
+        let answer = ask(
+            &root,
+            "Explain a for loop in six short sentences. Do not use tools.",
+            &model,
+            &control,
+        )
+        .unwrap();
+        let chunks = chunks.lock().unwrap();
+        assert!(
+            chunks
+                .iter()
+                .any(|(_, text)| !text.is_empty() && text.len() < answer.len()),
+            "the CLI must stream partial text before the final answer"
+        );
+        assert_eq!(chunks.last().unwrap().1.trim(), answer);
+        println!(
+            "{} CLI chunks, completed in {:?}",
+            chunks.len(),
+            start.elapsed()
+        );
+    }
 
     #[test]
     fn codex_is_read_only_ephemeral_and_runs_without_the_shared_daemon() {
         let mut cmd = Command::new("codex");
-        configure(&mut cmd, "gpt-example");
+        crate::codex_stream::configure(&mut cmd);
         let args: Vec<_> = cmd.get_args().map(|arg| arg.to_string_lossy()).collect();
         assert!(args.iter().any(|arg| arg == "--no-daemon"));
-        assert!(args.iter().any(|arg| arg == "exec"));
-        assert!(args.iter().any(|arg| arg == "--ephemeral"));
-        assert!(args.iter().any(|arg| arg == "--ignore-user-config"));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(args.iter().any(|arg| arg == "app-server"));
+        assert!(args.iter().any(|arg| arg == "sandbox_mode=\"read-only\""));
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--ask-for-approval", "never"]));
         for feature in ["apps", "plugins", "hooks"] {
             assert!(args.windows(2).any(|pair| pair == ["--disable", feature]));
         }
-        assert_eq!(args.last().map(|arg| arg.as_ref()), Some("-"));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--model", "gpt-example"]));
     }
 }

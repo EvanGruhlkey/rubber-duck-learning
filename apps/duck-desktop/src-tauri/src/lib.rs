@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod codex;
+mod codex_stream;
 mod models;
 mod project;
 mod request;
@@ -558,6 +559,7 @@ async fn duck_ask(
     project: String,
     model: String,
     request_id: u64,
+    on_reply: tauri::ipc::Channel<String>,
     requests: tauri::State<'_, Requests>,
     catalog: tauri::State<'_, CatalogState>,
 ) -> Result<String, String> {
@@ -565,6 +567,9 @@ async fn duck_ask(
     let catalog = catalog.get(&root)?;
     catalog.validate(&model)?;
     let control = requests.start(request_id)?;
+    control.stream_to(move |text| {
+        let _ = on_reply.send(text);
+    });
     let result = tauri::async_runtime::spawn_blocking(move || {
         answer(&message, catalog.ide, &model, mode, &root, &control)
     })
