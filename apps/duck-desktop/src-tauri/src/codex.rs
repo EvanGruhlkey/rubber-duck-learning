@@ -15,6 +15,7 @@ fn configure(cmd: &mut Command, model: &str) {
         "--sandbox",
         "read-only",
         "--ephemeral",
+        "--skip-git-repo-check",
         "--ignore-user-config",
         "--disable",
         "apps",

@@ -23,7 +23,26 @@ pub struct Catalog {
 }
 
 #[derive(Default)]
-pub struct CatalogState(pub Mutex<Option<Catalog>>);
+pub struct CatalogState(Mutex<std::collections::HashMap<std::path::PathBuf, Catalog>>);
+
+impl CatalogState {
+    pub fn store(&self, root: std::path::PathBuf, catalog: Catalog) -> Result<(), String> {
+        self.0
+            .lock()
+            .map_err(|_| "Restart the duck to reload your IDE.")?
+            .insert(root, catalog);
+        Ok(())
+    }
+
+    pub fn get(&self, root: &std::path::Path) -> Result<Catalog, String> {
+        self.0
+            .lock()
+            .map_err(|_| "Restart the duck to reload your IDE.")?
+            .get(root)
+            .cloned()
+            .ok_or_else(|| "Load this project's model list before asking.".into())
+    }
+}
 
 impl Catalog {
     pub fn validate(&self, model: &str) -> Result<(), String> {
@@ -191,6 +210,26 @@ pub fn parse_cursor(raw: &str) -> Result<Vec<Model>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn late_discovery_for_one_project_cannot_overwrite_another_project() {
+        let cache = CatalogState::default();
+        let catalog = |id: &str| Catalog {
+            ide: Ide::Codex,
+            models: vec![Model {
+                id: id.into(),
+                label: id.into(),
+            }],
+            warning: None,
+        };
+        let a = std::path::PathBuf::from("project-a");
+        let b = std::path::PathBuf::from("project-b");
+        cache.store(b.clone(), catalog("model-b")).unwrap();
+        cache.store(a.clone(), catalog("model-a")).unwrap();
+        assert_eq!(cache.get(&b).unwrap().models[0].id, "model-b");
+        assert_eq!(cache.get(&a).unwrap().models[0].id, "model-a");
+        assert!(cache.get(std::path::Path::new("unknown-project")).is_err());
+    }
 
     #[test]
     fn detects_the_launching_ide_and_never_guesses_from_installed_tools() {

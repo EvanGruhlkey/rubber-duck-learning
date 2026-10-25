@@ -3,11 +3,11 @@ use std::process::Command;
 
 mod codex;
 mod models;
+mod project;
 mod request;
+mod tutor;
 use models::{Catalog, CatalogState, Ide};
 use request::{run_cli, RequestControl, Requests};
-
-const COACHING_PROMPT: &str = "You are Rubber Duck, a read-only learning companion. Never edit files or provide paste-ready fixes. For debugging, ask one focused question and offer small hints grounded in files you read. For concept questions, explain in plain language first. Continue the provided conversation and keep replies concise.\n\n";
 
 fn configure_model(cmd: &mut Command, model: &str) {
     if !model.is_empty() {
@@ -451,30 +451,26 @@ fn cursor_programs() -> Vec<PathBuf> {
 }
 
 #[tauri::command]
-async fn duck_models(catalog: tauri::State<'_, CatalogState>) -> Result<Catalog, String> {
-    *catalog
-        .0
-        .lock()
-        .map_err(|_| "Restart the duck to reload your IDE.")? = None;
-    let result = tauri::async_runtime::spawn_blocking(discover_models)
+async fn duck_models(
+    project: String,
+    catalog: tauri::State<'_, CatalogState>,
+) -> Result<Catalog, String> {
+    let root = PathBuf::from(project::resolve(&project)?.root);
+    let discovery_root = root.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || discover_models(&discovery_root))
         .await
         .map_err(|_| "Could not read your IDE's models.")??;
-    *catalog
-        .0
-        .lock()
-        .map_err(|_| "Restart the duck to reload your IDE.")? = Some(result.clone());
+    catalog.store(root, result.clone())?;
     Ok(result)
 }
 
-fn discover_models() -> Result<Catalog, String> {
+fn discover_models(root: &Path) -> Result<Catalog, String> {
     let ide = models::current_ide()?;
-    let root =
-        project_root().ok_or("Open a project containing AGENTS.md before starting the duck.")?;
     let control = RequestControl::new(std::time::Duration::from_secs(15));
     let result = match ide {
-        Ide::Codex => codex::list_models(&root, &control),
-        Ide::Claude => list_claude_models(&root, &control),
-        Ide::Cursor => list_cursor_models(&root, &control),
+        Ide::Codex => codex::list_models(root, &control),
+        Ide::Claude => list_claude_models(root, &control),
+        Ide::Cursor => list_cursor_models(root, &control),
     };
     let (models, warning) = match result {
         Ok(models) => (models, None),
@@ -558,21 +554,19 @@ fn list_cursor_models(root: &Path, control: &RequestControl) -> Result<Vec<model
 #[tauri::command]
 async fn duck_ask(
     message: String,
+    mode: tutor::Mode,
+    project: String,
     model: String,
     request_id: u64,
     requests: tauri::State<'_, Requests>,
     catalog: tauri::State<'_, CatalogState>,
 ) -> Result<String, String> {
-    let catalog = catalog
-        .0
-        .lock()
-        .map_err(|_| "Restart the duck to reload your IDE.")?
-        .clone()
-        .ok_or("Load your IDE's models before asking.")?;
+    let root = PathBuf::from(project::resolve(&project)?.root);
+    let catalog = catalog.get(&root)?;
     catalog.validate(&model)?;
     let control = requests.start(request_id)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        answer(&message, catalog.ide, &model, &control)
+        answer(&message, catalog.ide, &model, mode, &root, &control)
     })
     .await;
     requests.finish(request_id)?;
@@ -588,6 +582,8 @@ fn answer(
     message: &str,
     ide: Ide,
     model: &str,
+    mode: tutor::Mode,
+    root: &Path,
     control: &RequestControl,
 ) -> Result<String, String> {
     let user = message.trim();
@@ -595,22 +591,15 @@ fn answer(
         return Err(String::from("Type something first, then press Ask."));
     }
 
-    let root = project_root().ok_or_else(|| {
-        String::from(
-            "Cannot find AGENTS.md. Run `npm run tauri:dev` from apps/duck-desktop, or set RUBBER_DUCK_PROJECT_ROOT to your repo root.",
-        )
-    })?;
-
-    let agents_path = root.join("AGENTS.md");
-    if !agents_path.is_file() {
-        return Err(format!("Missing {}", agents_path.display()));
-    }
-
-    let prompt = format!("{COACHING_PROMPT}{user}");
+    let prompt = format!(
+        "{}Selected project: {}\n\n{user}",
+        tutor::instructions(mode),
+        root.display()
+    );
     let result = match ide {
-        Ide::Codex => codex::ask(&root, &prompt, model, control),
-        Ide::Claude => try_claude(&root, &prompt, model, control),
-        Ide::Cursor => try_cursor_agent(&root, &prompt, model, control),
+        Ide::Codex => codex::ask(root, &prompt, model, control),
+        Ide::Claude => try_claude(root, &prompt, model, control),
+        Ide::Cursor => try_cursor_agent(root, &prompt, model, control),
     };
     control.check()?;
     result
@@ -622,7 +611,14 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Requests::default())
         .manage(CatalogState::default())
-        .invoke_handler(tauri::generate_handler![duck_ask, duck_cancel, duck_models])
+        .invoke_handler(tauri::generate_handler![
+            duck_ask,
+            duck_cancel,
+            duck_models,
+            project::duck_project,
+            project::duck_choose_project,
+            project::duck_attach_file
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
