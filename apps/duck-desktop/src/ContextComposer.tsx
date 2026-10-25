@@ -8,9 +8,9 @@ export function ContextComposer({ session, locked, onAttachFile, onChange }: Pro
   return <div className="context-composer">
     {session.attachments.length > 0 && <div className="context-list" aria-label="Attached context">{session.attachments.map((context) => <div className="context-item" key={context.id}>
       <details><summary>{context.label}</summary><pre>{context.text}</pre></details>
-      <button type="button" disabled={locked} aria-label={`Remove ${context.label}`} onClick={() => onChange((previous) => ({ ...previous, attachments: previous.attachments.filter((item) => item.id !== context.id) }))}>Remove</button>
+      <button type="button" disabled={locked} aria-label={`Remove ${context.label}`} onClick={() => onChange((previous) => ({ ...previous, attachments: previous.attachments.filter((item) => item.id !== context.id) }))}>×</button>
     </div>)}</div>}
-    <button type="button" className="context-toggle" disabled={locked || session.attachments.length >= 3} onClick={() => setAdding(adding === null ? "menu" : null)}>Add context{session.attachments.length > 0 ? ` (${session.attachments.length}/3)` : ""}</button>
+    <button type="button" className="context-toggle" aria-label="Add context" title="Add context" aria-expanded={adding !== null} disabled={locked || session.attachments.length >= 3} onClick={() => setAdding(adding === null ? "menu" : null)}>+</button>
     {adding === "menu" && <div className="compact-actions">
       <button type="button" disabled={locked} onClick={() => { setAdding(null); onAttachFile(); }}>Project file</button>
       <button type="button" onClick={() => setAdding("code")}>Paste code</button>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ChatTranscript } from "./ChatTranscript";
 import { ContextComposer } from "./ContextComposer";
 import { PlanPanel, type PlanSuggestion } from "./PlanPanel";
-import { MODE_HINTS, type TutorMode, type TutorSession } from "./tutor";
+import { type TutorMode, type TutorSession } from "./tutor";
 import type { Workspace } from "./useTutorWorkspace";
 
 export interface ModelCatalog {
@@ -29,6 +29,7 @@ interface Props {
   onStartFresh: () => void;
   onAsk: () => void;
   busy: boolean;
+  streamedReply: string;
   stopping: boolean;
   startedAt: number | null;
   onStop: () => void;
@@ -37,16 +38,9 @@ interface Props {
   error: string | null;
 }
 
-export function SpeechBubble({ catalog, model, onModelChange, onRefreshModels, workspace, onSessionChange, onChooseProject, onAttachFile, onHide, locked, picking, storageError, onStartFresh, onAsk, busy, stopping, startedAt, onStop, notice, onNewChat, error }: Props) {
+export function SpeechBubble({ catalog, model, onModelChange, onRefreshModels, workspace, onSessionChange, onChooseProject, onAttachFile, onHide, locked, picking, storageError, onStartFresh, onAsk, busy, streamedReply, stopping, onStop, notice, onNewChat, error }: Props) {
   const [progressOpen, setProgressOpen] = useState(false);
   const [suggestion, setSuggestion] = useState<PlanSuggestion | null>(null);
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (startedAt === null) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [startedAt]);
   const projectRoot = workspace.kind === "ready" ? workspace.project.root : null;
   useEffect(() => { setProgressOpen(false); setSuggestion(null); }, [projectRoot]);
   const selectedModel = catalog.kind === "ready" ? catalog.catalog.models.find((entry) => entry.id === model)?.label ?? "CLI default" : "Models";
@@ -57,7 +51,7 @@ export function SpeechBubble({ catalog, model, onModelChange, onRefreshModels, w
         <button type="button" className="project-picker" disabled={locked || workspace.kind === "loading"} onClick={onChooseProject} title={workspace.kind === "ready" ? workspace.project.root : "Choose a project folder"} aria-label="Choose project">
           <strong>{workspace.kind === "ready" ? workspace.project.name : workspace.kind === "loading" ? "Opening project..." : "Choose folder"}</strong>
         </button>
-        <button type="button" className="hide-panel" onClick={onHide}>Hide</button>
+        <button type="button" className="hide-panel" aria-label="Hide" title="Hide" onClick={onHide}>×</button>
       </header>
       {picking && <p className="picker-notice" role="status">{picking === "project" ? "Choose or cancel a folder in the open dialog." : "Choose or cancel a file in the open dialog."}</p>}
       {workspace.kind === "error" && <p className="speech-bubble-error" role="alert">{workspace.message}</p>}
@@ -80,20 +74,18 @@ export function SpeechBubble({ catalog, model, onModelChange, onRefreshModels, w
       {catalog.kind === "error" && <p className="speech-bubble-error" role="alert">{catalog.message}</p>}
       {workspace.kind === "ready" && <>
         <div className="tutor-toolbar">
-          <label htmlFor="tutor-mode">Mode</label>
-          <select id="tutor-mode" value={workspace.session.mode} disabled={locked} onChange={(event) => {
+          <select id="tutor-mode" aria-label="Mode" value={workspace.session.mode} disabled={locked} onChange={(event) => {
             const mode = event.target.value;
             if (mode === "ideate" || mode === "build" || mode === "debug") onSessionChange((previous) => ({ ...previous, mode }));
             setProgressOpen(false);
           }}>
             {(["ideate", "build", "debug"] satisfies TutorMode[]).map((mode) => <option key={mode} value={mode}>{mode[0].toUpperCase() + mode.slice(1)}</option>)}
           </select>
-          <button type="button" className="progress-toggle" aria-expanded={progressOpen} onClick={() => setProgressOpen(!progressOpen)}>{progressOpen ? "Back to chat" : `Progress${workspace.session.steps.length ? ` (${workspace.session.steps.filter((step) => step.done).length}/${workspace.session.steps.length})` : ""}`}</button>
+          <button type="button" className="progress-toggle" aria-expanded={progressOpen} onClick={() => setProgressOpen(!progressOpen)}>{progressOpen ? "← Chat" : `Progress${workspace.session.steps.length ? ` (${workspace.session.steps.filter((step) => step.done).length}/${workspace.session.steps.length})` : ""}`}</button>
+          <button type="button" className="new-chat" aria-label="New chat" title="New chat" disabled={locked || (!workspace.session.turns.length && !workspace.session.draft && !workspace.session.attachments.length && !error)} onClick={onNewChat}>↗</button>
         </div>
         <main className="tutor-content" aria-label={progressOpen ? "Learning progress" : "Chat"}>
-          {!progressOpen && (workspace.session.turns.length > 0
-            ? <ChatTranscript turns={workspace.session.turns} locked={locked} onReviewPlan={(plan) => { setSuggestion(plan); setProgressOpen(true); }} />
-            : <div className="empty-chat"><p>{MODE_HINTS[workspace.session.mode]}</p></div>)}
+          {!progressOpen && <ChatTranscript turns={workspace.session.turns} locked={locked} pending={busy ? { question: workspace.session.draft.trim(), answer: streamedReply } : null} onReviewPlan={(plan) => { setSuggestion(plan); setProgressOpen(true); }} />}
           {progressOpen && <>
             <label className="goal-field" htmlFor="learning-goal">Goal
               <input id="learning-goal" value={workspace.session.goal} maxLength={240} disabled={locked} placeholder="What are you working toward?" onChange={(event) => onSessionChange((previous) => ({ ...previous, goal: event.target.value }))} />
@@ -106,18 +98,21 @@ export function SpeechBubble({ catalog, model, onModelChange, onRefreshModels, w
         </main>
         <div className="tutor-composer">
           <ContextComposer key={workspace.project.root} session={workspace.session} locked={locked} onAttachFile={onAttachFile} onChange={onSessionChange} />
-          <label className="speech-bubble-label" htmlFor="duck-input">Your input</label>
-          <textarea id="duck-input" className="speech-bubble-input" rows={3} maxLength={12_000} value={workspace.session.draft} placeholder={workspace.session.mode === "ideate" ? "Describe your idea..." : workspace.session.mode === "build" ? "What are you building, or what did you try?" : "Paste an error or describe expected vs actual..."} disabled={locked} onChange={(event) => onSessionChange((previous) => ({ ...previous, draft: event.target.value }))} spellCheck />
+          <textarea id="duck-input" aria-label="Your input" className="speech-bubble-input" rows={2} maxLength={12_000} value={busy ? "" : workspace.session.draft} placeholder="Ask anything" disabled={locked} onChange={(event) => onSessionChange((previous) => ({ ...previous, draft: event.target.value }))} onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              if (!locked && catalog.kind === "ready" && workspace.session.draft.trim()) { setProgressOpen(false); onAsk(); }
+            }
+          }} spellCheck />
           <div className="speech-bubble-actions">
-            <button type="button" className="speech-bubble-ask" disabled={locked || catalog.kind !== "ready" || !workspace.session.draft.trim()} onClick={() => { setProgressOpen(false); onAsk(); }}>{stopping ? "Stopping…" : busy ? "Thinking…" : "Ask the duck"}</button>
-            {busy ? <button type="button" className="speech-bubble-secondary" disabled={stopping} onClick={onStop}>Stop</button>
-              : <button type="button" className="speech-bubble-secondary" disabled={locked || (!workspace.session.turns.length && !workspace.session.draft && !workspace.session.attachments.length && !error)} onClick={onNewChat}>New chat</button>}
+            {busy ? <button type="button" className="speech-bubble-ask" aria-label="Stop" title="Stop" disabled={stopping} onClick={onStop}>■</button>
+              : <button type="button" className="speech-bubble-ask" aria-label="Ask the duck" title="Send" disabled={locked || catalog.kind !== "ready" || !workspace.session.draft.trim()} onClick={() => { setProgressOpen(false); onAsk(); }}>↑</button>}
           </div>
         </div>
       </>}
-      <p className="speech-bubble-status" role="status">{startedAt !== null ? stopping ? "Stopping your local assistant..." : `Waiting for your local assistant. ${Math.max(0, Math.floor((now - startedAt) / 1000))}s of 120s.` : notice}</p>
+      {notice && <p className="speech-bubble-status" role="status">{notice}</p>}
       {error && <pre className="speech-bubble-error" role="alert">{error}</pre>}
-      {storageError ? <div className="save-error" role="alert">{storageError}<button type="button" disabled={locked} onClick={onStartFresh}>Start fresh</button></div> : workspace.kind === "ready" && <p className="save-status">Saved on this device</p>}
+      {storageError && <div className="save-error" role="alert">{storageError}<button type="button" disabled={locked} onClick={onStartFresh}>Start fresh</button></div>}
     </div>
   </div>;
 }

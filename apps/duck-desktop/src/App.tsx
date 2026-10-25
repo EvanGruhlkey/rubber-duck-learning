@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SpeechBubble, type ModelCatalog, type CatalogState } from "./SpeechBubble";
 import { composeMessage, createSession, replyForSession, type ChatTurn, type ContextAttachment } from "./tutor";
@@ -34,6 +34,7 @@ export default function App() {
   const requestRef = useRef<RequestStatus>(request);
   const nextRequestId = useRef(Date.now());
   const [notice, setNotice] = useState<string | null>(null);
+  const [streamedReply, setStreamedReply] = useState("");
   const busy = request.kind !== "idle";
   const locked = busy || picking !== null;
 
@@ -78,9 +79,14 @@ export default function App() {
     setRequest(pending);
     setError(null);
     setNotice(null);
+    setStreamedReply("");
     try {
       const message = composeMessage(session, text);
-      const out = await invoke<string>("duck_ask", { message, model, mode: session.mode, project: projectRoot, requestId: id });
+      const onReply = new Channel<string>();
+      onReply.onmessage = (reply) => {
+        if (requestRef.current.kind === "running" && requestRef.current.id === id) setStreamedReply(replyForSession(reply));
+      };
+      const out = await invoke<string>("duck_ask", { message, model, mode: session.mode, project: projectRoot, requestId: id, onReply });
       if (requestRef.current.kind === "running" && requestRef.current.id === id) {
         const turn: ChatTurn = { id: crypto.randomUUID(), question: text, answer: replyForSession(out), mode: session.mode, attachments: session.attachments };
         updateSession((previous) => ({ ...previous, turns: [...previous.turns, turn].slice(-40), draft: "", attachments: [] }), projectRoot);
@@ -225,6 +231,7 @@ export default function App() {
               onStartFresh={startFresh}
               onAsk={onAsk}
               busy={busy}
+              streamedReply={streamedReply}
               stopping={request.kind === "stopping"}
               startedAt={request.kind === "idle" ? null : request.startedAt}
               onStop={onStop}

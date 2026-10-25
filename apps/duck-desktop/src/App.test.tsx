@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class { onmessage = (_message: string) => {}; } }));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ startDragging: vi.fn() }),
 }));
@@ -35,13 +35,13 @@ beforeEach(() => {
   modelList.mockReset().mockResolvedValue(catalog);
   chooseProject.mockReset().mockResolvedValue(null);
   attachFile.mockReset().mockResolvedValue(null);
-  vi.mocked(invoke).mockReset().mockImplementation((command) => {
+  vi.mocked(invoke).mockReset().mockImplementation((command, args) => {
     if (command === "duck_project") return Promise.resolve(project);
     if (command === "duck_choose_project") return chooseProject();
     if (command === "duck_attach_file") return attachFile();
     if (command === "duck_models") return modelList();
     if (command === "duck_cancel") return cancel();
-    if (command === "duck_ask") return ask();
+    if (command === "duck_ask") return ask(args);
     return Promise.reject(new Error(`Unexpected command: ${command}`));
   });
 });
@@ -68,6 +68,29 @@ async function showNotes(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("duck conversation", () => {
+  it("shows dots then streamed text before completion, and ignores late chunks", async () => {
+    let reply = (_text: string) => {};
+    let finish = (_text: string) => {};
+    ask.mockImplementation((args: { onReply: { onmessage: (text: string) => void } }) => {
+      reply = args.onReply.onmessage;
+      return new Promise<string>((resolve) => { finish = resolve; });
+    });
+    const user = await openDuck();
+    expect(screen.getByRole("button", { name: "Add context" }).textContent).toBe("+");
+    await user.type(screen.getByRole("textbox", { name: "Your input" }), "Explain a loop{Enter}");
+    expect(screen.getByRole("status", { name: "Thinking" }).textContent).toBe("…");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your input" }).value).toBe("");
+    act(() => reply("A loop"));
+    expect(screen.queryByRole("status", { name: "Thinking" })).toBeNull();
+    expect(screen.getByLabelText("Current reply").textContent).toBe("A loop");
+    act(() => reply("A loop repeats."));
+    expect(screen.getByLabelText("Current reply").textContent).toBe("A loop repeats.");
+    await act(async () => finish("A loop repeats."));
+    expect(screen.queryByLabelText("Current reply")).toBeNull();
+    act(() => reply("Late output"));
+    expect(screen.queryByText("Late output")).toBeNull();
+    expect(screen.getAllByText("A loop repeats.")).toHaveLength(1);
+  });
   it("keeps chat simple and restores controls when a project chooser is cancelled", async () => {
     let cancelPicker: (value: null) => void = () => { throw new Error("Picker was not opened"); };
     chooseProject.mockImplementation(() => new Promise<null>((resolve) => { cancelPicker = resolve; }));
@@ -250,7 +273,7 @@ describe("duck conversation", () => {
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
     await user.click(screen.getByRole("button", { name: "Stop" }));
     expect(invoke).toHaveBeenLastCalledWith("duck_cancel", expect.objectContaining({ requestId: expect.any(Number) }));
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: /Stopping/ }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Stop" }).disabled).toBe(true);
     await act(async () => finish("A stale reply"));
     expect(screen.queryByText("A stale reply")).toBeNull();
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your input" }).value).toBe("Explain this error");
@@ -300,7 +323,7 @@ describe("duck conversation", () => {
     await user.click(screen.getByRole("button", { name: "Ask the duck" }));
     await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
     await user.click(screen.getByRole("button", { name: /Rubber duck:/ }));
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: /Thinking/ }).disabled).toBe(true);
+    expect(screen.getByRole("status", { name: "Thinking" })).toBeTruthy();
     expect(ask.mock.calls).toHaveLength(1);
     await act(async () => finish("What changed before the error?"));
     expect(await screen.findByText("What changed before the error?")).toBeTruthy();
