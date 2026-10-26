@@ -6,6 +6,10 @@
   <img src="apps/duck-desktop/public/duck.svg" width="112" height="112" alt="Pixel art rubber duck" />
 </p>
 
+<p align="center">
+  <img src="docs/rubber-duck-demo.gif" width="400" alt="Rubber Duck taking a question, streaming a reply, and returning to the textbox" />
+</p>
+
 This repo is a desktop rubber duck for developers who want help thinking through code.
 
 Rubber Duck Learning gives you a movable duck icon that stays on your screen while you code. Click it when you are stuck, paste an error or describe the bug, and it responds with Socratic questions, file-reading prompts, and small hints instead of dumping the solution.
