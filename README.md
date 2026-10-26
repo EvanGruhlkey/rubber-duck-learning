@@ -2,12 +2,9 @@
 
 <a href="https://github.com/EvanGruhlkey/rubber-duck-learning/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a> <a href="https://github.com/EvanGruhlkey/rubber-duck-learning/stargazers"><img src="https://img.shields.io/github/stars/EvanGruhlkey/rubber-duck-learning?style=flat" alt="Stars" /></a>
 
-<p align="center">
-  <img src="apps/duck-desktop/public/duck.svg" width="112" height="112" alt="Pixel art rubber duck" />
-</p>
 
 <p align="center">
-  <img src="docs/rubber-duck-demo-widescreen.gif" width="960" alt="Rubber Duck taking a question, streaming a reply, and returning to the textbox" />
+  <img src="docs/rubber-duck-demo-widescreen.gif" width="1028" alt="Rubber Duck taking a question, streaming a reply, and returning to the textbox" />
 </p>
 
 This repo is a desktop rubber duck for developers who want help thinking through code.
