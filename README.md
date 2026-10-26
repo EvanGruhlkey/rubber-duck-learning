@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/rubber-duck-demo.gif" width="960" alt="Rubber Duck taking a question, streaming a reply, and returning to the textbox" />
+  <img src="docs/rubber-duck-demo-widescreen.gif" width="960" alt="Rubber Duck taking a question, streaming a reply, and returning to the textbox" />
 </p>
 
 This repo is a desktop rubber duck for developers who want help thinking through code.
