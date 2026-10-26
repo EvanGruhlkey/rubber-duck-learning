@@ -6,12 +6,12 @@ alwaysApply: true
 
 This repo is the **desktop duck app** (`apps/duck-desktop/`) plus **Socratic pedagogy** for AI in the IDE. There is **no website** here.
 
-Read **`AGENTS.md`** at the repo root before making changes. Follow its **Product rules** and **Pedagogy in practice**—not only short bullets below.
+The app's tutor instructions live in `apps/duck-desktop/src-tauri/src/tutor.rs`.
 
 ## When helping the human
 
 - **Do not** write or paste code meant to be dropped into their repo as the solution.
-- **Do** lead with **substance** (see **`AGENTS.md`** Voice): no opening recap of rules, no “how I’ll treat it” bullet menus, no “general vs codebase?” before a real answer.
+- **Do** lead with **substance**: no opening recap of rules, no “how I’ll treat it” bullet menus, no “general vs codebase?” before a real answer.
 - **Do** answer “what does X mean?” style questions in **plain language first**.
 - **Do** ask one focused question per turn and give **at most three** concrete pointers when they are **debugging this repo**: file path, line range or symbol to search, or a read-only / diagnostic command.
 - **Do** build on what they said they saw, expected, and tried. Scaffold hints; avoid premature full answers **when the task is finding or fixing project code**.

@@ -64,12 +64,30 @@ pub fn read_context(root: &Path, path: &Path) -> Result<FileContext, String> {
 
 #[tauri::command]
 pub async fn duck_project(path: Option<String>) -> Result<Project, String> {
-    let path = path
-        .map(PathBuf::from)
-        .or_else(crate::project_root)
-        .or_else(|| std::env::current_dir().ok())
-        .ok_or("Choose a project folder to start.")?;
+    let path = match path {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let cwd = std::env::current_dir().map_err(|_| "Choose a project folder to start.")?;
+            initial_root(
+                &cwd,
+                std::env::var("RUBBER_DUCK_PROJECT_ROOT").ok().as_deref(),
+            )
+        }
+    };
     resolve(&path.to_string_lossy())
+}
+
+fn initial_root(cwd: &Path, configured: Option<&str>) -> PathBuf {
+    if let Some(raw) = configured {
+        let path = crate::trim_env_path(raw);
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    cwd.ancestors()
+        .find(|dir| dir.join(".git").exists())
+        .unwrap_or(cwd)
+        .to_path_buf()
 }
 
 #[tauri::command]
@@ -112,6 +130,23 @@ pub async fn duck_attach_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_git_roots_and_accepts_worktrees_and_folders_without_instructions() {
+        let root = test_dir();
+        let nested = root.join("src");
+        std::fs::create_dir(&nested).unwrap();
+        assert_eq!(initial_root(&nested, None), nested);
+        assert_eq!(initial_root(&nested, Some(root.to_str().unwrap())), root);
+        std::fs::create_dir(root.join(".git")).unwrap();
+        assert_eq!(initial_root(&nested, None), root);
+        std::fs::remove_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git"), "gitdir: elsewhere").unwrap();
+        assert_eq!(initial_root(&nested, None), root);
+        std::fs::remove_file(root.join(".git")).unwrap();
+        std::fs::remove_dir(&nested).unwrap();
+        std::fs::remove_dir(&root).unwrap();
+    }
 
     #[test]
     fn accepts_an_existing_project_without_agent_instructions() {

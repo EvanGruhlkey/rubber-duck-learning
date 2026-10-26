@@ -29,7 +29,7 @@ fn trim_env_path(raw: &str) -> String {
 }
 
 /// Load `.env` into the process environment so `std::env::var("RUBBER_DUCK_*")` works.
-/// Walks from `current_dir` up to parents (same idea as finding `AGENTS.md`).
+/// Walks from the current working directory up through its parents.
 fn load_dotenv_walking_parents() {
     let Ok(mut dir) = std::env::current_dir() else {
         return;
@@ -72,24 +72,6 @@ fn augment_path_env(cmd: &mut Command) {
         let merged = format!("{}{}", prefix, base);
         cmd.env("PATH", merged);
     }
-}
-
-/// Optional: absolute path to repo root (folder containing `AGENTS.md`).
-fn project_root() -> Option<PathBuf> {
-    if let Ok(raw) = std::env::var("RUBBER_DUCK_PROJECT_ROOT") {
-        let p = PathBuf::from(trim_env_path(&raw));
-        if p.join("AGENTS.md").is_file() {
-            return Some(p);
-        }
-    }
-    let mut dir = std::env::current_dir().ok()?;
-    for _ in 0..16 {
-        if dir.join("AGENTS.md").is_file() {
-            return Some(dir);
-        }
-        dir = dir.parent()?.to_path_buf();
-    }
-    None
 }
 
 fn trim_output(s: String) -> String {
@@ -276,7 +258,7 @@ fn try_claude(
         .unwrap_or_else(|| String::from("no claude candidate ran")))
 }
 
-/// Cursor agent: prompt is the user’s question only (no `AGENTS.md`—lets the model answer normally).
+/// Cursor agent in read-only Ask mode.
 fn agent_programs() -> Vec<PathBuf> {
     let mut agent_programs: Vec<PathBuf> = Vec::new();
     for key in ["RUBBER_DUCK_AGENT", "RUBBER_DUCK_CURSOR_AGENT"] {

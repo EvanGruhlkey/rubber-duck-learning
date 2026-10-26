@@ -16,7 +16,7 @@ Codex catalogs come from `codex debug models`, with hidden entries excluded. Cla
 - **Claude Code**: Uses plan mode, with only `Read`, `Glob`, and `Grep` available. Slash commands and inherited MCP servers are disabled.
 - **Cursor**: Uses `agent --trust -p --mode ask` or `cursor agent --trust -p --mode ask`. Cursor stays in its read-only Ask mode; the app never passes `--force`.
 
-- **Project root**: Open **+**, then choose the folder option. New projects do not need Git or `AGENTS.md`. The selected folder is the CLI working directory. On first launch, `RUBBER_DUCK_PROJECT_ROOT` or a parent containing `AGENTS.md` supplies the initial folder when available.
+- **Project root**: Open **+**, then choose the folder option. New projects do not need Git or instruction files. The selected folder is the CLI working directory. On first launch, the app uses `RUBBER_DUCK_PROJECT_ROOT` when set, otherwise the nearest parent containing `.git`, or the current working directory when no repository is found.
 - **Claude Code**: Install the CLI, run `claude auth login`, and ensure `claude` is on `PATH` when you start the duck.
 - **Cursor**: Install the Cursor CLI and sign in (e.g. `agent login`). On Windows the app may prepend `%LOCALAPPDATA%\cursor-agent` to `PATH` so `agent` is found. Auth is whatever the CLI uses—this app does not store API keys.
 
@@ -37,7 +37,7 @@ npm run tauri:dev
 
 `npm run tauri:*` goes through `scripts/tauri-env.mjs`, which sets **`CARGO_TARGET_DIR`** outside OneDrive by default on Windows to avoid MSVC PDB issues when the repo lives under OneDrive. Override with your own **`CARGO_TARGET_DIR`** if you want.
 
-Pedagogy for assistants in the repo: [`AGENTS.md`](../../AGENTS.md). The app supplies its own mode instructions to the CLI.
+The app supplies its mode instructions to the CLI from [`src-tauri/src/tutor.rs`](./src-tauri/src/tutor.rs).
 
 ## Icons
 
